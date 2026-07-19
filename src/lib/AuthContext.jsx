@@ -3,30 +3,45 @@ import { supabase } from './supabaseClient';
 
 const AuthContext = createContext();
 
+async function fetchProfile(userId) {
+  const { data } = await supabase
+    .from('profiles')
+    .select('id, email, full_name, is_admin, plan_id')
+    .eq('id', userId)
+    .single();
+  return data || null;
+}
+
 export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(null);
+  const [user,            setUser]            = useState(null);
+  const [profile,         setProfile]         = useState(null);
+  const [isAdmin,         setIsAdmin]         = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [isLoadingAuth, setIsLoadingAuth] = useState(true);
+  const [isLoadingAuth,   setIsLoadingAuth]   = useState(true);
+
+  const applySession = async (supabaseUser) => {
+    if (supabaseUser) {
+      setUser(supabaseUser);
+      setIsAuthenticated(true);
+      const prof = await fetchProfile(supabaseUser.id);
+      setProfile(prof);
+      setIsAdmin(!!prof?.is_admin);
+    } else {
+      setUser(null);
+      setProfile(null);
+      setIsAdmin(false);
+      setIsAuthenticated(false);
+    }
+  };
 
   useEffect(() => {
-    // Restore session on mount
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
-        setUser(session.user);
-        setIsAuthenticated(true);
-      }
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      await applySession(session?.user ?? null);
       setIsLoadingAuth(false);
     });
 
-    // Listen for auth state changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session?.user) {
-        setUser(session.user);
-        setIsAuthenticated(true);
-      } else {
-        setUser(null);
-        setIsAuthenticated(false);
-      }
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      await applySession(session?.user ?? null);
     });
 
     return () => subscription.unsubscribe();
@@ -35,26 +50,12 @@ export const AuthProvider = ({ children }) => {
   const login = async (email, password) => {
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) throw new Error(error.message);
-    setUser(data.user);
-    setIsAuthenticated(true);
     return data.user;
   };
 
-  const register = async (email, password) => {
-    const { data, error } = await supabase.auth.signUp({ email, password });
-    if (error) throw new Error(error.message);
-    // signUp may return a user even if email confirmation is required
-    if (data.user) {
-      setUser(data.user);
-      setIsAuthenticated(true);
-    }
-    return data.user;
-  };
-
+  // register is intentionally not exposed — accounts are created by admin only
   const logout = async () => {
     await supabase.auth.signOut();
-    setUser(null);
-    setIsAuthenticated(false);
     window.location.href = '/login';
   };
 
@@ -63,13 +64,14 @@ export const AuthProvider = ({ children }) => {
   return (
     <AuthContext.Provider value={{
       user,
+      profile,
+      isAdmin,
       isAuthenticated,
       isLoadingAuth,
       isLoadingPublicSettings: false,
       authError: null,
       authChecked: true,
       login,
-      register,
       logout,
       navigateToLogin,
       checkUserAuth: () => {},
