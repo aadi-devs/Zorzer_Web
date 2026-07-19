@@ -1,9 +1,17 @@
-import { MessageCircle, Users, Shield, Zap, ExternalLink, Copy, Check } from "lucide-react";
+import {
+  MessageCircle,
+  Users,
+  Shield,
+  Zap,
+  ExternalLink,
+  Copy,
+  Check,
+} from "lucide-react";
 import SiteFooter from "@/components/return/SiteFooter";
 import { useState } from "react";
 
 const OWNER_USERNAME = "victusxnaruto";
-const DISCORD_INVITE = "https://discord.gg/returnstress"; // update with real invite link when ready
+const DISCORD_INVITE = "https://discord.gg/ug4YYCznwP"; // update with real invite link when ready
 
 const PERKS = [
   {
@@ -43,7 +51,8 @@ export default function Discord() {
             Join our Discord
           </h1>
           <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
-            Get support, stay updated, and connect with the ReturnStress community.
+            Get support, stay updated, and connect with the ReturnStress
+            community.
           </p>
         </header>
 
@@ -68,8 +77,8 @@ export default function Discord() {
                     ReturnStress Discord
                   </h2>
                   <p className="mt-2 max-w-md text-sm text-muted-foreground">
-                    Our official server for support, announcements, and community chat.
-                    Click below to join — it's free.
+                    Our official server for support, announcements, and
+                    community chat. Click below to join — it's free.
                   </p>
                 </div>
 
@@ -111,26 +120,35 @@ export default function Discord() {
                   {OWNER_USERNAME.slice(0, 2).toUpperCase()}
                 </span>
                 <div className="min-w-0 flex-1">
-                  <p className="font-mono text-sm font-semibold">{OWNER_USERNAME}</p>
-                  <p className="text-[11px] text-muted-foreground">Owner · ReturnStress</p>
+                  <p className="font-mono text-sm font-semibold">
+                    {OWNER_USERNAME}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground">
+                    Owner · ReturnStress
+                  </p>
                 </div>
               </div>
 
               <div className="mt-4 flex items-center justify-between rounded-lg border border-white/[0.06] bg-black/30 px-3 py-2.5">
-                <span className="font-mono text-xs text-zinc-300">{OWNER_USERNAME}</span>
+                <span className="font-mono text-xs text-zinc-300">
+                  {OWNER_USERNAME}
+                </span>
                 <button
                   onClick={copyUsername}
                   className="ml-2 shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-white/[0.06] hover:text-foreground"
                   title="Copy username"
                 >
-                  {copied
-                    ? <Check className="h-3.5 w-3.5 text-zinc-300" />
-                    : <Copy className="h-3.5 w-3.5" />}
+                  {copied ? (
+                    <Check className="h-3.5 w-3.5 text-zinc-300" />
+                  ) : (
+                    <Copy className="h-3.5 w-3.5" />
+                  )}
                 </button>
               </div>
 
               <p className="mt-3 text-xs text-muted-foreground">
-                DM the owner on Discord for VIP plans, partnerships, or urgent support.
+                DM the owner on Discord for VIP plans, partnerships, or urgent
+                support.
               </p>
             </div>
 
@@ -138,7 +156,10 @@ export default function Discord() {
               <p className="mb-1 text-sm font-medium">Need help?</p>
               <p className="text-xs text-muted-foreground">
                 Join the server and open a support ticket, or DM{" "}
-                <span className="font-mono text-zinc-300">{OWNER_USERNAME}</span> directly on Discord.
+                <span className="font-mono text-zinc-300">
+                  {OWNER_USERNAME}
+                </span>{" "}
+                directly on Discord.
               </p>
             </div>
           </aside>
