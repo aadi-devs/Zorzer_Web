@@ -1,26 +1,73 @@
-// paste your Panel.jsx content here
-import { useState } from "react";
-import { Crosshair, Clock, Layers, Play, ChevronDown } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Crosshair, Layers, Play, Square } from "lucide-react";
 import SiteFooter from "@/components/return/SiteFooter";
+import { supabase } from "@/lib/supabaseClient";
+import { useAuth } from "@/lib/AuthContext";
 
 const L4_METHODS = ["Method A", "Method B", "Method C"];
 const L7_METHODS = ["Method A", "Method B", "Method C", "Method D"];
-
-const RUNNING = [
-  { id: "#A4F2", target: "203.0.113.10", layer: "L4", method: "Method A", time: "312s", status: "running" },
-  { id: "#B91C", target: "app.example.dev", layer: "L7", method: "Method B", time: "118s", status: "running" },
-  { id: "#C7E0", target: "198.51.100.7", layer: "L4", method: "Method C", time: "00s", status: "queued" },
-];
+const DURATIONS = [60, 120, 300, 600, 1200];
 
 export default function Panel() {
+  const { user } = useAuth();
   const [layer, setLayer] = useState("L4");
   const [method, setMethod] = useState("Method A");
+  const [target, setTarget] = useState("");
+  const [duration, setDuration] = useState(300);
+  const [launching, setLaunching] = useState(false);
+  const [launchError, setLaunchError] = useState("");
+  const [runs, setRuns] = useState([]);
   const methods = layer === "L4" ? L4_METHODS : L7_METHODS;
 
   const selectLayer = (l) => {
     setLayer(l);
     setMethod(l === "L4" ? L4_METHODS[0] : L7_METHODS[0]);
+    setTarget("");
   };
+
+  // Fetch active/recent runs
+  useEffect(() => {
+    if (!user) return;
+    fetchRuns();
+  }, [user]);
+
+  async function fetchRuns() {
+    const { data } = await supabase
+      .from("runs")
+      .select("*")
+      .eq("user_id", user.id)
+      .in("status", ["running", "queued"])
+      .order("created_at", { ascending: false })
+      .limit(10);
+    if (data) setRuns(data);
+  }
+
+  async function launch(e) {
+    e.preventDefault();
+    if (!target.trim()) return;
+    setLaunchError("");
+    setLaunching(true);
+    const { error } = await supabase.from("runs").insert({
+      user_id: user.id,
+      target: target.trim(),
+      layer,
+      method,
+      duration,
+      status: "queued",
+    });
+    setLaunching(false);
+    if (error) {
+      setLaunchError("Failed to launch run: " + error.message);
+    } else {
+      setTarget("");
+      fetchRuns();
+    }
+  }
+
+  async function stopRun(id) {
+    await supabase.from("runs").update({ status: "success", stopped_at: new Date().toISOString() }).eq("id", id);
+    fetchRuns();
+  }
 
   return (
     <div className="relative z-10">
@@ -33,8 +80,7 @@ export default function Panel() {
             Launch Panel
           </h1>
           <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
-            Configure a run across Layer 4 &amp; Layer 7. Design template — controls are
-            non-functional.
+            Configure and launch stress test runs across Layer 4 &amp; Layer 7.
           </p>
         </header>
 
@@ -45,13 +91,14 @@ export default function Panel() {
               <div className="border-b border-white/[0.06] px-5 py-4">
                 <h2 className="text-sm font-semibold">New run</h2>
               </div>
-              <div className="space-y-5 p-5">
+              <form onSubmit={launch} className="space-y-5 p-5">
                 {/* Layer toggle */}
                 <Field label="Layer">
                   <div className="inline-flex rounded-lg border border-white/[0.08] bg-black/40 p-1">
                     {["L4", "L7"].map((l) => (
                       <button
                         key={l}
+                        type="button"
                         onClick={() => selectLayer(l)}
                         className={`flex items-center gap-1.5 rounded-md px-4 py-1.5 text-xs font-medium transition-colors ${
                           layer === l ? "bg-white text-black" : "text-muted-foreground hover:text-foreground"
@@ -64,107 +111,106 @@ export default function Panel() {
                   </div>
                 </Field>
 
-                {/* Inputs differ by layer */}
-                {layer === "L4" ? (
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                    <Field label="Server IP">
-                      <input
-                        type="text"
-                        placeholder="203.0.113.10"
-                        className="w-full rounded-lg border border-white/[0.08] bg-black/40 px-3 py-2.5 font-mono text-sm outline-none ring-1 ring-transparent transition focus:border-white/20 focus:ring-white/10"
-                      />
-                    </Field>
-                    <Field label="Domain">
-                      <input
-                        type="text"
-                        placeholder="example.com"
-                        className="w-full rounded-lg border border-white/[0.08] bg-black/40 px-3 py-2.5 font-mono text-sm outline-none ring-1 ring-transparent transition focus:border-white/20 focus:ring-white/10"
-                      />
-                    </Field>
+                {/* Target */}
+                <Field label={layer === "L4" ? "Server IP" : "Target URL"}>
+                  <input
+                    required
+                    type="text"
+                    value={target}
+                    onChange={(e) => setTarget(e.target.value)}
+                    placeholder={layer === "L4" ? "203.0.113.10" : "https://example.com"}
+                    className="w-full rounded-lg border border-white/[0.08] bg-black/40 px-3 py-2.5 font-mono text-sm outline-none ring-1 ring-transparent transition focus:border-white/20 focus:ring-white/10"
+                  />
+                </Field>
+
+                {/* Method */}
+                <Field label="Method">
+                  <div className="flex flex-wrap gap-2">
+                    {methods.map((m) => (
+                      <button
+                        key={m}
+                        type="button"
+                        onClick={() => setMethod(m)}
+                        className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+                          method === m
+                            ? "bg-white text-black"
+                            : "border border-white/[0.08] text-muted-foreground hover:text-foreground"
+                        }`}
+                      >
+                        {m}
+                      </button>
+                    ))}
                   </div>
-                ) : (
-                  <Field label="IP address">
-                    <input
-                      type="text"
-                      placeholder="203.0.113.10"
-                      className="w-full rounded-lg border border-white/[0.08] bg-black/40 px-3 py-2.5 font-mono text-sm outline-none ring-1 ring-transparent transition focus:border-white/20 focus:ring-white/10"
-                    />
-                  </Field>
+                </Field>
+
+                {/* Duration */}
+                <Field label="Duration">
+                  <div className="flex flex-wrap gap-2">
+                    {DURATIONS.map((d) => (
+                      <button
+                        key={d}
+                        type="button"
+                        onClick={() => setDuration(d)}
+                        className={`rounded-full px-3 py-1.5 font-mono text-xs font-medium transition-colors ${
+                          duration === d
+                            ? "bg-white text-black"
+                            : "border border-white/[0.08] text-muted-foreground hover:text-foreground"
+                        }`}
+                      >
+                        {d}s
+                      </button>
+                    ))}
+                  </div>
+                </Field>
+
+                {launchError && (
+                  <p className="text-xs text-red-400">{launchError}</p>
                 )}
 
-                {/* Duration + Method */}
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <Field label="Duration (s)">
-                    <div className="relative">
-                      <Clock className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-                      <input
-                        type="text"
-                        defaultValue="600"
-                        className="w-full rounded-lg border border-white/[0.08] bg-black/40 py-2.5 pl-9 pr-3 font-mono text-sm outline-none focus:border-white/20 focus:ring-1 focus:ring-white/10"
-                      />
-                    </div>
-                  </Field>
-                  <Field label="Method">
-                    <div className="relative">
-                      <select
-                        value={method}
-                        onChange={(e) => setMethod(e.target.value)}
-                        className="w-full appearance-none rounded-lg border border-white/[0.08] bg-black/40 px-3 py-2.5 pr-9 font-mono text-sm outline-none focus:border-white/20 focus:ring-1 focus:ring-white/10"
-                      >
-                        {methods.map((m) => (
-                          <option key={m} value={m} className="bg-zinc-900">
-                            {m}
-                          </option>
-                        ))}
-                      </select>
-                      <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-                    </div>
-                  </Field>
-                </div>
-
-                <div className="flex items-center gap-3 pt-2">
-                  <button className="group relative inline-flex p-px rounded-full bg-gradient-to-b from-white/25 via-zinc-500/40 to-white/15 transition-[box-shadow] duration-200 hover:shadow-[0_0_0_1px_rgba(255,255,255,0.12),0_0_24px_rgba(255,255,255,0.08)]">
-                    <span className="relative z-10 flex items-center gap-2 rounded-full bg-black px-6 py-2.5 text-xs font-medium text-white ring-1 ring-white/10">
-                      <Play className="h-3.5 w-3.5" /> Start
-                    </span>
-                  </button>
-
-                </div>
-              </div>
+                <button
+                  type="submit"
+                  disabled={launching}
+                  className="flex w-full items-center justify-center gap-2 rounded-full bg-white px-6 py-2.5 text-sm font-medium text-black ring-1 ring-white/10 transition-colors hover:bg-zinc-200 disabled:opacity-60"
+                >
+                  <Play className="h-4 w-4" />
+                  {launching ? "Queuing…" : "Launch run"}
+                </button>
+              </form>
             </div>
           </section>
 
-          {/* Live snapshot */}
+          {/* Active runs */}
           <section className="lg:col-span-2">
             <div className="rounded-2xl border border-white/[0.08] bg-zinc-900/70 backdrop-blur-sm">
               <div className="flex items-center justify-between border-b border-white/[0.06] px-5 py-4">
-                <h2 className="text-sm font-semibold">Live status</h2>
-                <span className="inline-flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
-                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-zinc-400" /> 2 active
-                </span>
+                <h2 className="text-sm font-semibold">Active runs</h2>
+                <span className="font-mono text-[10px] text-muted-foreground">{runs.length} active</span>
               </div>
-              <div className="grid grid-cols-3 divide-x divide-white/[0.05]">
-                <Snap label="Active" value="2" />
-                <Snap label="Queued" value="1" />
-                <Snap label="Today" value="14" />
-              </div>
-              <ul className="divide-y divide-white/[0.05]">
-                {RUNNING.map((r) => (
-                  <li key={r.id} className="px-5 py-3.5">
-                    <div className="flex items-center justify-between">
-                      <span className="font-mono text-xs text-muted-foreground">{r.id}</span>
+              {runs.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-12 text-center">
+                  <Crosshair className="mb-3 h-8 w-8 text-muted-foreground/30" />
+                  <p className="text-xs text-muted-foreground">No active runs</p>
+                </div>
+              ) : (
+                <ul className="divide-y divide-white/[0.05]">
+                  {runs.map((r) => (
+                    <li key={r.id} className="flex items-center gap-3 px-4 py-3">
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate font-mono text-xs font-medium">{r.target}</p>
+                        <p className="text-[10px] text-muted-foreground">{r.layer} · {r.method} · {r.duration}s</p>
+                      </div>
                       <StatusPill status={r.status} />
-                    </div>
-                    <p className="mt-1 truncate font-mono text-sm">{r.target}</p>
-                    <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
-                      <span className="rounded border border-white/10 px-1.5 py-0.5">{r.layer}</span>
-                      <span>{r.method}</span>
-                      <span>·</span>
-                      <span>{r.time}</span>
-                    </div>
-                  </li>
-                ))}
-              </ul>
+                      <button
+                        onClick={() => stopRun(r.id)}
+                        className="ml-1 rounded-md p-1 text-muted-foreground transition-colors hover:bg-white/[0.06] hover:text-foreground"
+                        title="Stop run"
+                      >
+                        <Square className="h-3.5 w-3.5" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           </section>
         </div>
@@ -187,24 +233,13 @@ function Field({ label, children }) {
   );
 }
 
-function Snap({ label, value }) {
-  return (
-    <div className="px-3 py-4 text-center">
-      <p className="font-mono text-xl font-medium">{value}</p>
-      <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p>
-    </div>
-  );
-}
-
 function StatusPill({ status }) {
   const map = {
     running: "bg-zinc-100/10 text-zinc-200 ring-white/10",
-    queued: "bg-white/[0.04] text-muted-foreground ring-white/[0.06]",
+    queued:  "bg-white/[0.04] text-muted-foreground ring-white/[0.06]",
   };
   return (
-    <span
-      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ${map[status]}`}
-    >
+    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ${map[status] || map.queued}`}>
       {status === "running" && <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-zinc-300" />}
       {status}
     </span>

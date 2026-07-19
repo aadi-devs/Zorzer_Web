@@ -1,23 +1,97 @@
-// paste your Settings.jsx content here
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Settings as SettingsIcon, User, Lock, Palette, Check } from "lucide-react";
 import SiteFooter from "@/components/return/SiteFooter";
+import { supabase } from "@/lib/supabaseClient";
+import { useAuth } from "@/lib/AuthContext";
 
 const SECTIONS = [
-  { id: "account", label: "Account", icon: User },
-  { id: "security", label: "Security", icon: Lock },
-  { id: "preferences", label: "Display", icon: Palette },
+  { id: "account",     label: "Account",     icon: User },
+  { id: "security",    label: "Security",    icon: Lock },
+  { id: "preferences", label: "Display",     icon: Palette },
 ];
 
 export default function Settings() {
-  const [section, setSection] = useState("account");
-  const [saved, setSaved] = useState(false);
+  const { user } = useAuth();
+  const [section, setSection]   = useState("account");
+  const [saved, setSaved]       = useState(false);
+  const [saving, setSaving]     = useState(false);
+  const [error, setError]       = useState("");
+
+  // Account fields
+  const [fullName, setFullName] = useState("");
+  const [email, setEmail]       = useState("");
+
+  // Display prefs
   const [prefs, setPrefs] = useState({ compact: false, animations: true, mono: true });
 
-  const save = (e) => {
-    e.preventDefault();
+  // Load profile on mount
+  useEffect(() => {
+    if (!user) return;
+    setEmail(user.email || "");
+    async function loadProfile() {
+      const { data } = await supabase
+        .from("profiles")
+        .select("full_name, compact_layout, animations_enabled, monospace_numerics")
+        .eq("id", user.id)
+        .single();
+      if (data) {
+        setFullName(data.full_name || "");
+        setPrefs({
+          compact:    data.compact_layout,
+          animations: data.animations_enabled,
+          mono:       data.monospace_numerics,
+        });
+      }
+    }
+    loadProfile();
+  }, [user]);
+
+  const flash = () => {
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
+  };
+
+  const saveAccount = async (e) => {
+    e.preventDefault();
+    setError("");
+    setSaving(true);
+    const { error: err } = await supabase
+      .from("profiles")
+      .update({ full_name: fullName, updated_at: new Date().toISOString() })
+      .eq("id", user.id);
+    setSaving(false);
+    if (err) setError(err.message);
+    else flash();
+  };
+
+  const savePassword = async (e) => {
+    e.preventDefault();
+    setError("");
+    const newPw = e.target.newPassword.value;
+    const confirm = e.target.confirmPassword.value;
+    if (newPw !== confirm) { setError("Passwords do not match."); return; }
+    setSaving(true);
+    const { error: err } = await supabase.auth.updateUser({ password: newPw });
+    setSaving(false);
+    if (err) setError(err.message);
+    else { flash(); e.target.reset(); }
+  };
+
+  const savePrefs = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    const { error: err } = await supabase
+      .from("profiles")
+      .update({
+        compact_layout:      prefs.compact,
+        animations_enabled:  prefs.animations,
+        monospace_numerics:  prefs.mono,
+        updated_at:          new Date().toISOString(),
+      })
+      .eq("id", user.id);
+    setSaving(false);
+    if (err) setError(err.message);
+    else flash();
   };
 
   return (
@@ -42,7 +116,7 @@ export default function Settings() {
               {SECTIONS.map((s) => (
                 <button
                   key={s.id}
-                  onClick={() => setSection(s.id)}
+                  onClick={() => { setSection(s.id); setError(""); }}
                   className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
                     section === s.id
                       ? "bg-white/[0.06] text-foreground ring-1 ring-white/10"
@@ -59,68 +133,83 @@ export default function Settings() {
           {/* Section content */}
           <section className="lg:col-span-3">
             <div className="rounded-2xl border border-white/[0.08] bg-zinc-900/70 backdrop-blur-sm">
+              {/* Account */}
               {section === "account" && (
-                <FormCard title="Account information" desc="Update your display name and contact email.">
-                  <form onSubmit={save} className="space-y-4">
+                <FormCard title="Account information" desc="Update your display name.">
+                  <form onSubmit={saveAccount} className="space-y-4">
                     <Field label="Full name">
                       <input
-                        defaultValue="Operator"
+                        value={fullName}
+                        onChange={(e) => setFullName(e.target.value)}
+                        placeholder="Your name"
                         className="w-full rounded-lg border border-white/[0.08] bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-white/20 focus:ring-1 focus:ring-white/10"
                       />
                     </Field>
                     <Field label="Email address">
                       <input
                         type="email"
-                        defaultValue="operator@returnstress.io"
+                        value={email}
+                        disabled
+                        className="w-full rounded-lg border border-white/[0.08] bg-black/40 px-3 py-2.5 text-sm text-muted-foreground outline-none"
+                      />
+                    </Field>
+                    {error && <p className="text-xs text-red-400">{error}</p>}
+                    <SubmitButton saved={saved} saving={saving} label="Save changes" />
+                  </form>
+                </FormCard>
+              )}
+
+              {/* Security */}
+              {section === "security" && (
+                <FormCard title="Change password" desc="Choose a strong, unique password for your account.">
+                  <form onSubmit={savePassword} className="space-y-4">
+                    <Field label="New password">
+                      <input
+                        name="newPassword"
+                        type="password"
+                        required
                         className="w-full rounded-lg border border-white/[0.08] bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-white/20 focus:ring-1 focus:ring-white/10"
                       />
                     </Field>
-                    <SubmitButton saved={saved} label="Save changes" />
-                  </form>
-                </FormCard>
-              )}
-
-              {section === "security" && (
-                <FormCard title="Change password" desc="Choose a strong, unique password for your account.">
-                  <form onSubmit={save} className="space-y-4">
-                    <Field label="Current password">
-                      <input type="password" placeholder="••••••••" className="input-base" />
+                    <Field label="Confirm new password">
+                      <input
+                        name="confirmPassword"
+                        type="password"
+                        required
+                        className="w-full rounded-lg border border-white/[0.08] bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-white/20 focus:ring-1 focus:ring-white/10"
+                      />
                     </Field>
-                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                      <Field label="New password">
-                        <input type="password" placeholder="••••••••" className="input-base" />
-                      </Field>
-                      <Field label="Confirm password">
-                        <input type="password" placeholder="••••••••" className="input-base" />
-                      </Field>
-                    </div>
-                    <SubmitButton saved={saved} label="Update password" />
+                    {error && <p className="text-xs text-red-400">{error}</p>}
+                    <SubmitButton saved={saved} saving={saving} label="Update password" />
                   </form>
                 </FormCard>
               )}
 
+              {/* Preferences */}
               {section === "preferences" && (
-                <FormCard title="Display preferences" desc="Customize how the console looks and feels.">
-                  <div className="space-y-3">
+                <FormCard title="Display preferences" desc="Adjust how the interface looks and behaves.">
+                  <form onSubmit={savePrefs} className="space-y-5">
                     <Toggle
                       label="Compact layout"
-                      desc="Reduce spacing between cards and rows."
-                      on={prefs.compact}
-                      onToggle={() => setPrefs((p) => ({ ...p, compact: !p.compact }))}
+                      desc="Reduce spacing to fit more content on screen."
+                      checked={prefs.compact}
+                      onChange={(v) => setPrefs({ ...prefs, compact: v })}
                     />
                     <Toggle
                       label="Animations"
-                      desc="Enable background motion and transitions."
-                      on={prefs.animations}
-                      onToggle={() => setPrefs((p) => ({ ...p, animations: !p.animations }))}
+                      desc="Enable motion effects and transitions."
+                      checked={prefs.animations}
+                      onChange={(v) => setPrefs({ ...prefs, animations: v })}
                     />
                     <Toggle
                       label="Monospace numerics"
-                      desc="Render figures in JetBrains Mono."
-                      on={prefs.mono}
-                      onToggle={() => setPrefs((p) => ({ ...p, mono: !p.mono }))}
+                      desc="Use monospace font for numbers and IDs."
+                      checked={prefs.mono}
+                      onChange={(v) => setPrefs({ ...prefs, mono: v })}
                     />
-                  </div>
+                    {error && <p className="text-xs text-red-400">{error}</p>}
+                    <SubmitButton saved={saved} saving={saving} label="Save preferences" />
+                  </form>
                 </FormCard>
               )}
             </div>
@@ -130,8 +219,6 @@ export default function Settings() {
       <div className="mt-12">
         <SiteFooter />
       </div>
-
-      <style>{`.input-base{width:100%;border-radius:0.5rem;border:1px solid rgba(255,255,255,0.08);background:rgba(0,0,0,0.4);padding:0.625rem 0.75rem;font-size:0.875rem;outline:none}.input-base:focus{border-color:rgba(255,255,255,0.2);box-shadow:0 0 0 1px rgba(255,255,255,0.1)}`}</style>
     </div>
   );
 }
@@ -159,36 +246,39 @@ function Field({ label, children }) {
   );
 }
 
-function SubmitButton({ saved, label }) {
+function Toggle({ label, desc, checked, onChange }) {
   return (
-    <div className="flex items-center gap-3 pt-2">
+    <div className="flex items-center justify-between gap-4">
+      <div>
+        <p className="text-sm font-medium">{label}</p>
+        {desc && <p className="text-xs text-muted-foreground">{desc}</p>}
+      </div>
       <button
-        type="submit"
-        className="inline-flex items-center gap-2 rounded-full bg-white px-6 py-2.5 text-xs font-medium text-black ring-1 ring-white/10 transition-colors hover:bg-zinc-200"
+        type="button"
+        onClick={() => onChange(!checked)}
+        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+          checked ? "bg-white" : "bg-white/[0.1]"
+        }`}
       >
-        {saved ? <Check className="h-3.5 w-3.5" /> : null}
-        {saved ? "Saved" : label}
+        <span
+          className={`inline-block h-4 w-4 transform rounded-full transition-transform ${
+            checked ? "translate-x-6 bg-black" : "translate-x-1 bg-zinc-400"
+          }`}
+        />
       </button>
     </div>
   );
 }
 
-function Toggle({ label, desc, on, onToggle }) {
+function SubmitButton({ saved, saving, label }) {
   return (
-    <div className="flex items-center justify-between rounded-xl border border-white/[0.06] bg-white/[0.02] px-4 py-3.5">
-      <div>
-        <p className="text-sm font-medium">{label}</p>
-        <p className="text-xs text-muted-foreground">{desc}</p>
-      </div>
-      <button
-        onClick={onToggle}
-        className={`relative h-6 w-11 rounded-full transition-colors ${on ? "bg-white" : "bg-white/15"}`}
-        aria-pressed={on}
-      >
-        <span
-          className={`absolute top-0.5 h-5 w-5 rounded-full bg-zinc-900 transition-transform ${on ? "translate-x-5" : "translate-x-0.5"}`}
-        />
-      </button>
-    </div>
+    <button
+      type="submit"
+      disabled={saving}
+      className="flex items-center gap-2 rounded-full bg-white px-5 py-2 text-xs font-medium text-black ring-1 ring-white/10 transition-colors hover:bg-zinc-200 disabled:opacity-60"
+    >
+      {saved ? <Check className="h-3.5 w-3.5" /> : null}
+      {saved ? "Saved" : saving ? "Saving…" : label}
+    </button>
   );
 }

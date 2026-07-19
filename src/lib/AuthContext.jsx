@@ -1,21 +1,7 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
+import { supabase } from './supabaseClient';
 
 const AuthContext = createContext();
-
-const USERS_KEY = 'rs_users';
-const SESSION_KEY = 'rs_session';
-
-const getUsers = () => {
-  try { return JSON.parse(localStorage.getItem(USERS_KEY) || '[]'); }
-  catch { return []; }
-};
-
-const saveUsers = (users) => localStorage.setItem(USERS_KEY, JSON.stringify(users));
-
-const getSession = () => {
-  try { return JSON.parse(localStorage.getItem(SESSION_KEY) || 'null'); }
-  catch { return null; }
-};
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
@@ -23,46 +9,50 @@ export const AuthProvider = ({ children }) => {
   const [isLoadingAuth, setIsLoadingAuth] = useState(true);
 
   useEffect(() => {
-    const session = getSession();
-    if (session) {
-      setUser(session);
-      setIsAuthenticated(true);
-    }
-    setIsLoadingAuth(false);
+    // Restore session on mount
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        setUser(session.user);
+        setIsAuthenticated(true);
+      }
+      setIsLoadingAuth(false);
+    });
+
+    // Listen for auth state changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        setUser(session.user);
+        setIsAuthenticated(true);
+      } else {
+        setUser(null);
+        setIsAuthenticated(false);
+      }
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
-  const login = (email, password) => {
-    const users = getUsers();
-    const found = users.find(u => u.email === email && u.password === password);
-    if (!found) throw new Error('Invalid email or password');
-    const { password: _, ...safeUser } = found;
-    localStorage.setItem(SESSION_KEY, JSON.stringify(safeUser));
-    setUser(safeUser);
+  const login = async (email, password) => {
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) throw new Error(error.message);
+    setUser(data.user);
     setIsAuthenticated(true);
-    return safeUser;
+    return data.user;
   };
 
-  const register = (email, password) => {
-    const users = getUsers();
-    if (users.find(u => u.email === email)) {
-      throw new Error('An account with this email already exists');
+  const register = async (email, password) => {
+    const { data, error } = await supabase.auth.signUp({ email, password });
+    if (error) throw new Error(error.message);
+    // signUp may return a user even if email confirmation is required
+    if (data.user) {
+      setUser(data.user);
+      setIsAuthenticated(true);
     }
-    const newUser = {
-      id: crypto.randomUUID(),
-      email,
-      password,
-      createdAt: new Date().toISOString(),
-    };
-    saveUsers([...users, newUser]);
-    const { password: _, ...safeUser } = newUser;
-    localStorage.setItem(SESSION_KEY, JSON.stringify(safeUser));
-    setUser(safeUser);
-    setIsAuthenticated(true);
-    return safeUser;
+    return data.user;
   };
 
-  const logout = () => {
-    localStorage.removeItem(SESSION_KEY);
+  const logout = async () => {
+    await supabase.auth.signOut();
     setUser(null);
     setIsAuthenticated(false);
     window.location.href = '/login';

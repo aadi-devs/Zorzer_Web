@@ -1,19 +1,45 @@
-// paste your Feedback.jsx content here
 import { useState } from "react";
-import { MessageSquare, Send, Check } from "lucide-react";
+import { MessageSquare, Send, CheckCircle2 } from "lucide-react";
 import SiteFooter from "@/components/return/SiteFooter";
+import { supabase } from "@/lib/supabaseClient";
+import { useAuth } from "@/lib/AuthContext";
 
 const TOPICS = ["General", "Bug report", "Feature request", "Account", "Billing"];
 
-export default function Feedback() {
-  const [sent, setSent] = useState(false);
-  const [form, setForm] = useState({ name: "", email: "", topic: "General", message: "" });
+const INIT = { name: "", email: "", topic: "General", message: "" };
 
-  const submit = (e) => {
+export default function Feedback() {
+  const { user } = useAuth();
+  const [form, setForm] = useState({
+    ...INIT,
+    name: user?.user_metadata?.full_name || "",
+    email: user?.email || "",
+  });
+  const [sent, setSent] = useState(false);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const submit = async (e) => {
     e.preventDefault();
-    setSent(true);
-    setForm({ name: "", email: "", topic: "General", message: "" });
-    setTimeout(() => setSent(false), 3000);
+    setError("");
+    setLoading(true);
+    const { error: err } = await supabase.from("feedback").insert({
+      user_id: user?.id || null,
+      name: form.name,
+      email: form.email,
+      topic: form.topic,
+      message: form.message,
+    });
+    setLoading(false);
+    if (err) {
+      setError("Failed to send feedback. Please try again.");
+    } else {
+      setSent(true);
+      setTimeout(() => {
+        setSent(false);
+        setForm({ ...INIT, name: user?.user_metadata?.full_name || "", email: user?.email || "" });
+      }, 3000);
+    }
   };
 
   return (
@@ -27,7 +53,7 @@ export default function Feedback() {
             Send feedback
           </h1>
           <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
-            Have a thought, bug, or feature request? Drop us a line — we read every message.
+            Report bugs, request features, or reach out directly. We read every message.
           </p>
         </header>
 
@@ -83,18 +109,31 @@ export default function Feedback() {
                     rows={5}
                     value={form.message}
                     onChange={(e) => setForm({ ...form, message: e.target.value })}
-                    placeholder="Tell us what's on your mind…"
+                    placeholder="Describe your issue or idea…"
                     className="input-base resize-none"
                   />
                 </Field>
+
+                {error && (
+                  <p className="text-xs text-red-400">{error}</p>
+                )}
+
                 <button
                   type="submit"
-                  className="group relative inline-flex p-px rounded-full bg-gradient-to-b from-white/25 via-zinc-500/40 to-white/15 transition-[box-shadow] duration-200 hover:shadow-[0_0_0_1px_rgba(255,255,255,0.12),0_0_24px_rgba(255,255,255,0.08)]"
+                  disabled={loading || sent}
+                  className="flex w-full items-center justify-center gap-2 rounded-full bg-white px-4 py-2.5 text-sm font-medium text-black ring-1 ring-white/10 transition-colors hover:bg-zinc-200 disabled:opacity-60"
                 >
-                  <span className="relative z-10 flex items-center gap-2 rounded-full bg-black px-6 py-2.5 text-xs font-medium text-white ring-1 ring-white/10">
-                    {sent ? <Check className="h-3.5 w-3.5" /> : <Send className="h-3.5 w-3.5" />}
-                    {sent ? "Message sent" : "Send feedback"}
-                  </span>
+                  {sent ? (
+                    <>
+                      <CheckCircle2 className="h-4 w-4" />
+                      Message sent
+                    </>
+                  ) : (
+                    <>
+                      <Send className="h-4 w-4" />
+                      {loading ? "Sending…" : "Send feedback"}
+                    </>
+                  )}
                 </button>
               </form>
             </div>
