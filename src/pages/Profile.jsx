@@ -1,25 +1,21 @@
-// paste your Profile.jsx content here
-import { useState } from "react";
-import { UserCircle, Mail, Crown, Check, Shield } from "lucide-react";
+import { Check, UserCircle, Crown, Zap, Rocket, Star } from "lucide-react";
 import SiteFooter from "@/components/return/SiteFooter";
+import { useAuth } from "@/lib/AuthContext";
 
-const PLAN_FEATURES = [
-  "Layer 4 access",
-  "Method A, B & C",
-  "1 concurrent run",
-  "600s max duration",
-  "Priority routing",
-];
+const PLAN_ICONS = {
+  Basic: Zap,
+  Elite: Rocket,
+  Adv:   Star,
+  God:   Crown,
+};
 
 export default function Profile() {
-  const [email, setEmail] = useState("operator@returnstress.io");
-  const [saved, setSaved] = useState(false);
+  const { user, profile } = useAuth();
+  const plan = profile?.plan || null;
+  const PlanIcon = plan ? (PLAN_ICONS[plan.name] || Crown) : Crown;
 
-  const save = (e) => {
-    e.preventDefault();
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
-  };
+  const displayName = profile?.full_name || user?.user_metadata?.full_name || user?.email?.split("@")[0] || "User";
+  const initials    = displayName.slice(0, 2).toUpperCase();
 
   return (
     <div className="relative z-10">
@@ -32,82 +28,114 @@ export default function Profile() {
             Your profile
           </h1>
           <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
-            View your plan status, update your email, and manage account preferences.
+            Your account details and active plan perks.
           </p>
         </header>
 
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-          {/* Plan status */}
+          {/* Account card */}
           <aside className="lg:col-span-1">
             <div className="rounded-2xl border border-white/[0.08] bg-zinc-900/70 p-5 backdrop-blur-sm">
-              <div className="flex items-center gap-2">
-                <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-white/[0.04] ring-1 ring-white/10">
-                  <Crown className="h-4 w-4 text-zinc-300" />
+              {/* Avatar */}
+              <div className="flex flex-col items-center gap-3 pb-5 text-center">
+                <span className="flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-b from-white/25 via-zinc-500/40 to-white/15 text-xl font-semibold ring-2 ring-white/10">
+                  {initials}
                 </span>
                 <div>
-                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Current plan</p>
-                  <p className="font-heading text-xl font-semibold">Pro · L4</p>
+                  <p className="font-heading text-lg font-semibold">{displayName}</p>
+                  <p className="text-xs text-muted-foreground">{user?.email}</p>
                 </div>
               </div>
-              <div className="mt-5 space-y-3 text-sm">
-                <Row label="Concurrent" value="1 slot" />
-                <Row label="Max duration" value="600s" />
-                <Row label="Layers" value="L4 / L7" />
-                <Row label="Renews" value="Aug 18" />
+
+              {/* Plan badge */}
+              <div className="border-t border-white/[0.06] pt-5">
+                <p className="mb-3 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                  Current plan
+                </p>
+                {plan ? (
+                  <div className="flex items-center gap-2.5 rounded-xl border border-white/[0.08] bg-white/[0.03] px-3 py-2.5">
+                    <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/[0.06] ring-1 ring-white/10">
+                      <PlanIcon className="h-4 w-4 text-zinc-300" />
+                    </span>
+                    <div>
+                      <p className="text-sm font-semibold">{plan.name}</p>
+                      <p className="text-[11px] text-muted-foreground">{plan.tagline}</p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 px-3 py-2.5">
+                    <p className="text-xs text-amber-300">No plan assigned. Contact your admin.</p>
+                  </div>
+                )}
               </div>
-              <ul className="mt-5 space-y-2 border-t border-white/[0.06] pt-5">
-                {PLAN_FEATURES.map((f) => (
-                  <li key={f} className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <Check className="h-3.5 w-3.5 text-zinc-300" />
-                    {f}
-                  </li>
-                ))}
-              </ul>
+
+              {/* Quick stats */}
+              {plan && (
+                <div className="mt-4 grid grid-cols-2 gap-2">
+                  <Stat label="Max duration" value={`${plan.max_duration}s`} />
+                  <Stat label="Daily attacks" value={plan.max_daily_runs === 0 ? "∞" : String(plan.max_daily_runs)} />
+                  <Stat label="Slots" value={String(plan.concurrent_slots)} />
+                  <Stat
+                    label="Layers"
+                    value={(plan.access_layers || []).join(" + ") || "—"}
+                  />
+                </div>
+              )}
             </div>
           </aside>
 
-          {/* Email + preferences */}
-          <section className="space-y-6 lg:col-span-2">
+          {/* Plan perks */}
+          <section className="lg:col-span-2">
             <div className="rounded-2xl border border-white/[0.08] bg-zinc-900/70 backdrop-blur-sm">
               <div className="border-b border-white/[0.06] px-5 py-4">
-                <h2 className="text-sm font-semibold">Contact email</h2>
-                <p className="mt-1 text-xs text-muted-foreground">Used for sign-in and account notices.</p>
+                <h2 className="text-sm font-semibold">Plan perks</h2>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Everything included in your {plan ? plan.name : "current"} plan.
+                </p>
               </div>
-              <form onSubmit={save} className="space-y-4 p-5">
-                <div>
-                  <label className="mb-1.5 block text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-                    Email address
-                  </label>
-                  <div className="relative">
-                    <Mail className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-                    <input
-                      type="email"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      className="w-full rounded-lg border border-white/[0.08] bg-black/40 py-2.5 pl-9 pr-3 text-sm outline-none focus:border-white/20 focus:ring-1 focus:ring-white/10"
-                    />
-                  </div>
-                </div>
-                <button
-                  type="submit"
-                  className="inline-flex items-center gap-2 rounded-full bg-white px-6 py-2.5 text-xs font-medium text-black ring-1 ring-white/10 transition-colors hover:bg-zinc-200"
-                >
-                  {saved ? <Check className="h-3.5 w-3.5" /> : null}
-                  {saved ? "Saved" : "Update email"}
-                </button>
-              </form>
-            </div>
 
-            <div className="rounded-2xl border border-white/[0.08] bg-zinc-900/70 backdrop-blur-sm">
-              <div className="border-b border-white/[0.06] px-5 py-4">
-                <h2 className="text-sm font-semibold">Account preferences</h2>
-                <p className="mt-1 text-xs text-muted-foreground">Manage how your account behaves.</p>
-              </div>
-              <div className="divide-y divide-white/[0.05]">
-                <PrefRow icon={Shield} title="Two-factor authentication" desc="Add an extra layer of security at sign-in." action="Enable" />
-                <PrefRow icon={Mail} title="Email notifications" desc="Receive product and status updates by email." action="Manage" />
-                <PrefRow icon={Crown} title="Plan auto-renew" desc="Keep your plan active when it expires." action="On" />
-              </div>
+              {plan ? (
+                <div className="p-5 space-y-6">
+                  {/* Feature list */}
+                  <ul className="space-y-3">
+                    {(plan.features || []).map((f) => (
+                      <li key={f} className="flex items-center gap-3">
+                        <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-white/[0.06] ring-1 ring-white/10">
+                          <Check className="h-3 w-3 text-zinc-300" />
+                        </span>
+                        <span className="text-sm text-zinc-200">{f}</span>
+                      </li>
+                    ))}
+                  </ul>
+
+                  {/* Methods */}
+                  {plan.methods?.length > 0 && (
+                    <div>
+                      <p className="mb-2.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                        Available methods
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {plan.methods.map((m) => (
+                          <span
+                            key={m}
+                            className="rounded-full border border-white/[0.08] bg-white/[0.03] px-3 py-1 font-mono text-xs text-zinc-300"
+                          >
+                            {m}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
+                  <Crown className="h-8 w-8 text-muted-foreground/30" />
+                  <p className="text-sm text-muted-foreground">No plan assigned yet.</p>
+                  <p className="text-xs text-muted-foreground/60">
+                    Ask your admin to assign a plan to unlock the panel.
+                  </p>
+                </div>
+              )}
             </div>
           </section>
         </div>
@@ -119,28 +147,11 @@ export default function Profile() {
   );
 }
 
-function Row({ label, value }) {
+function Stat({ label, value }) {
   return (
-    <div className="flex items-center justify-between">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="font-mono">{value}</span>
-    </div>
-  );
-}
-
-function PrefRow({ icon: Icon, title, desc, action }) {
-  return (
-    <div className="flex items-center gap-4 px-5 py-4">
-      <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/[0.04] ring-1 ring-white/10">
-        <Icon className="h-4 w-4 text-zinc-400" />
-      </span>
-      <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium">{title}</p>
-        <p className="text-xs text-muted-foreground">{desc}</p>
-      </div>
-      <button className="rounded-full border border-white/[0.08] px-4 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-white/[0.06] hover:text-foreground">
-        {action}
-      </button>
+    <div className="rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2.5">
+      <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p>
+      <p className="mt-0.5 font-mono text-sm font-medium">{value}</p>
     </div>
   );
 }

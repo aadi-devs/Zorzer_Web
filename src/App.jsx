@@ -13,6 +13,7 @@ import Settings from '@/pages/Settings';
 import Activity from '@/pages/Activity';
 import Profile from '@/pages/Profile';
 import Feedback from '@/pages/Feedback';
+import Discord from '@/pages/Discord';
 import Admin from '@/pages/Admin';
 import Login from '@/pages/Login';
 import ForgotPassword from '@/pages/ForgotPassword';
@@ -52,6 +53,7 @@ const AuthenticatedApp = () => {
         <Route path="/activity"  element={<Activity />} />
         <Route path="/profile"   element={<Profile />} />
         <Route path="/feedback"  element={<Feedback />} />
+        <Route path="/discord"   element={<Discord />} />
         <Route
           path="/admin"
           element={

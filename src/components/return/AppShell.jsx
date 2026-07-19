@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { NavLink, Outlet, Link } from "react-router-dom";
+import { NavLink, Outlet, Link, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard,
   Crosshair,
@@ -195,14 +195,14 @@ function SidebarContent({ linkClass, logout, isAdmin, displayName, email, onNavi
             {item.label}
           </NavLink>
         ))}
-        <a
-          href="#"
-          className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-white/[0.04] hover:text-foreground"
+        <NavLink
+          to="/discord"
+          className={linkClass}
           onClick={onNavigate}
         >
           <MessageCircle className="h-4 w-4" />
           Discord
-        </a>
+        </NavLink>
         {isAdmin && (
           <NavLink to="/admin" className={linkClass} onClick={onNavigate}>
             <Shield className="h-4 w-4 text-amber-400" />
