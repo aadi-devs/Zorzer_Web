@@ -1,5 +1,2 @@
-import { createClient } from '@base44/sdk';
-
-export const base44 = createClient({
-  appId: import.meta.env.VITE_BASE44_APP_ID,
-});
+// Base44 SDK removed — custom auth is now handled in src/lib/AuthContext.jsx
+export const base44 = {};
