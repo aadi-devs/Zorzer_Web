@@ -74,7 +74,7 @@ export default function Discord() {
 
                 <div>
                   <h2 className="font-heading text-2xl font-semibold tracking-tight">
-                    ReturnStress Discord
+                    Zorzer Stresser Discord
                   </h2>
                   <p className="mt-2 max-w-md text-sm text-muted-foreground">
                     Our official server for support, announcements, and
@@ -124,7 +124,7 @@ export default function Discord() {
                     {OWNER_USERNAME}
                   </p>
                   <p className="text-[11px] text-muted-foreground">
-                    Owner · ReturnStress
+                    Owner · Zorzer Stresser
                   </p>
                 </div>
               </div>

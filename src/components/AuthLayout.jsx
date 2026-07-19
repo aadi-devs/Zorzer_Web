@@ -15,7 +15,7 @@ export default function AuthLayout({ icon: Icon, title, subtitle, footer, childr
               <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white/5 ring-1 ring-white/10">
                 <GlobeLogo className="h-5 w-5" />
               </span>
-              <span className="font-heading text-lg font-semibold tracking-tight">ReturnStress</span>
+              <span className="font-heading text-lg font-semibold tracking-tight">Zorzer Stresser</span>
             </Link>
             <div className="inline-flex h-12 w-12 items-center justify-center rounded-xl bg-white/[0.04] ring-1 ring-white/10">
               <Icon className="h-5 w-5 text-zinc-300" aria-hidden="true" />

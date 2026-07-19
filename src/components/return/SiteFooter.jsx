@@ -40,7 +40,7 @@ export default function SiteFooter() {
           </nav>
         </div>
         <div className="mt-8 flex flex-col items-center justify-between gap-2 border-t border-white/[0.06] pt-6 text-xs text-muted-foreground sm:flex-row">
-          <p>© {new Date().getFullYear()} ReturnStress. Design clone — for template use only.</p>
+          <p>© {new Date().getFullYear()} Zorzer Stresser. All rights reserved.</p>
           <p>Built for maximum power · Layer 4 &amp; Layer 7</p>
         </div>
       </div>

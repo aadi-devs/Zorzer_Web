@@ -146,8 +146,8 @@ export default function Feedback() {
                 Prefer a real-time chat? Reach us on Discord or browse the docs.
               </p>
               <div className="mt-4 space-y-2">
-                <Channel label="Discord" value="ReturnStress#0001" />
-                <Channel label="Status" value="status.returnstress.io" />
+                <Channel label="Discord" value="victusxnaruto" />
+                <Channel label="Platform" value="Zorzer Stresser" />
                 <Channel label="Response time" value="~24 hours" />
               </div>
             </div>

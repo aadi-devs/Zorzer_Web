@@ -90,10 +90,10 @@ export default function AppShell() {
               </button>
               <Link to="/dashboard" className="flex items-center gap-2 lg:hidden">
                 <GlobeLogo className="h-5 w-5" />
-                <span className="font-medium">ReturnStress</span>
+                <span className="font-medium">Zorzer Stresser</span>
               </Link>
               <span className="hidden text-xs uppercase tracking-wider text-muted-foreground lg:block">
-                ReturnStress Console
+                Zorzer Stresser Console
               </span>
             </div>
 
@@ -183,7 +183,7 @@ function SidebarContent({ linkClass, logout, isAdmin, displayName, email, onNavi
           <GlobeLogo className="h-5 w-5" />
         </span>
         <div className="flex flex-col">
-          <span className="font-semibold leading-tight">ReturnStress</span>
+          <span className="font-semibold leading-tight">Zorzer Stresser</span>
           <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Console</span>
         </div>
       </Link>
