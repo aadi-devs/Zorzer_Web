@@ -1,4 +1,5 @@
 import express from "express";
+import { randomUUID } from "crypto";
 import { createClient } from "@supabase/supabase-js";
 
 const app = express();
@@ -18,6 +19,31 @@ const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
 
 const L4_METHODS = new Set(["UDP-NORMAL", "UDP-BYPASS", "ICMP"]);
 const L7_METHODS = new Set(["HTTP-GET", "HTTP-POST", "API-FLOOD", "RAPID-RESET"]);
+
+// ── Single-use launch tokens (anti-replay) ────────────────────────────────────
+// Prevents copying a DevTools request and replaying it outside the website.
+// Each token is tied to a user, expires in 30 s, and is deleted on first use.
+const launchTokens = new Map(); // Map<token, { userId, expiresAt }>
+const TOKEN_TTL_MS = 30_000;
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [tok, meta] of launchTokens)
+    if (meta.expiresAt <= now) launchTokens.delete(tok);
+}, 60_000);
+
+function consumeLaunchToken(token, userId) {
+  if (!token) return { ok: false, reason: "Missing launch token — request one first" };
+  const meta = launchTokens.get(token);
+  if (!meta)              return { ok: false, reason: "Invalid or already-used launch token" };
+  if (meta.expiresAt <= Date.now()) {
+    launchTokens.delete(token);
+    return { ok: false, reason: "Launch token expired — request a new one" };
+  }
+  if (meta.userId !== userId) return { ok: false, reason: "Launch token user mismatch" };
+  launchTokens.delete(token); // single-use: consume immediately
+  return { ok: true };
+}
 
 // ── Auth middleware — verify JWT and load profile ─────────────────────────────
 async function requireAuth(req, res, next) {
@@ -46,6 +72,16 @@ function requireAdmin(req, res, next) {
   if (!req.isAdmin) return res.status(403).json({ error: "Admin access required" });
   next();
 }
+
+// ── GET /proxy/launch-token ───────────────────────────────────────────────────
+// Issues a single-use, 30 s token tied to the authenticated user.
+// The /l4/start and /l7/start endpoints require and consume this token,
+// so a payload copied from DevTools cannot be replayed.
+app.get("/proxy/launch-token", requireAuth, (_req, res) => {
+  const token = randomUUID();
+  launchTokens.set(token, { userId: _req.user.id, expiresAt: Date.now() + TOKEN_TTL_MS });
+  res.json({ token, expiresIn: TOKEN_TTL_MS / 1000 });
+});
 
 // ── Policy check ──────────────────────────────────────────────────────────────
 async function checkPolicy(req, layer, method, duration) {
@@ -96,7 +132,10 @@ async function fetchWithTimeout(url, options, ms = 15000) {
 
 // ── POST /proxy/l7/start ──────────────────────────────────────────────────────
 app.post("/proxy/l7/start", requireAuth, async (req, res) => {
-  const { target, method, duration } = req.body;
+  const { target, method, duration, launch_token } = req.body;
+
+  const tok = consumeLaunchToken(launch_token, req.user.id);
+  if (!tok.ok) return res.status(403).json({ error: tok.reason });
 
   if (!target || typeof target !== "string" || !target.trim())
     return res.status(400).json({ error: "Invalid target" });
@@ -172,7 +211,10 @@ app.post("/proxy/l7/stop", requireAuth, async (req, res) => {
 
 // ── POST /proxy/l4/start ──────────────────────────────────────────────────────
 app.post("/proxy/l4/start", requireAuth, async (req, res) => {
-  const { target, port, method, duration } = req.body;
+  const { target, port, method, duration, launch_token } = req.body;
+
+  const tok = consumeLaunchToken(launch_token, req.user.id);
+  if (!tok.ok) return res.status(403).json({ error: tok.reason });
 
   if (!target || typeof target !== "string" || !target.trim())
     return res.status(400).json({ error: "Invalid target" });
