@@ -41,6 +41,7 @@ export default function Panel() {
   const [runs,        setRuns]        = useState([]);
   const [todayCount,  setTodayCount]  = useState(0);
   const [l4Busy,      setL4Busy]      = useState(false);
+  const [l7Busy,      setL7Busy]      = useState(false);
 
   const currentMethods = layer === "L4" ? l4Methods : l7Methods;
   const durations = ALL_DURATIONS.filter(d => maxDuration === 0 || d <= maxDuration);
@@ -66,6 +67,7 @@ export default function Panel() {
     setTarget("");
     setPort("");
     setLaunchInfo("");
+    setLaunchError("");
   };
 
   async function checkL4Busy() {
@@ -73,13 +75,22 @@ export default function Panel() {
     setL4Busy(!!data);
   }
 
+  async function checkL7Busy() {
+    const { data } = await supabase.rpc("is_l7_busy");
+    setL7Busy(!!data);
+  }
+
+  async function checkBusy() {
+    await Promise.all([checkL4Busy(), checkL7Busy()]);
+  }
+
   useEffect(() => {
     if (!user) return;
     fetchRuns();
     fetchTodayCount();
-    checkL4Busy();
-    // Poll every 5 s so the busy state stays fresh
-    const timer = setInterval(checkL4Busy, 5000);
+    checkBusy();
+    // Poll every 5 s so busy states stay fresh
+    const timer = setInterval(checkBusy, 5000);
     return () => clearInterval(timer);
   }, [user]);
 
@@ -107,10 +118,18 @@ export default function Panel() {
       ...(l7Data || []).map(r => ({ ...r, layer: "L7", _table: "l7_runs" })),
     ];
 
-    // Auto-expire runs whose duration window has passed
-    const expired = all.filter(r =>
-      r.started_at && new Date(r.started_at).getTime() + r.duration * 1000 <= now
-    );
+    // Auto-expire runs whose duration window has passed.
+    // For "running" runs: use started_at + duration.
+    // For "queued" runs (API never responded): use created_at + duration + 30s grace.
+    const expired = all.filter(r => {
+      if (r.started_at) {
+        return new Date(r.started_at).getTime() + r.duration * 1000 <= now;
+      } else {
+        // queued with no started_at — expire after duration + 30 s grace period
+        return new Date(r.created_at).getTime() + (r.duration + 30) * 1000 <= now;
+      }
+    });
+
     if (expired.length > 0) {
       await Promise.all(
         expired.map(r =>
@@ -119,7 +138,7 @@ export default function Panel() {
             .eq("id", r.id)
         )
       );
-      checkL4Busy();
+      checkBusy();
     }
 
     const expiredIds = new Set(expired.map(r => r.id));
@@ -154,6 +173,8 @@ export default function Panel() {
   // UDP-NORMAL (method 1) needs a port; UDP-BYPASS (method 2) does not
   const needsPort = layer === "L4" && method === "UDP-NORMAL";
   const l4Blocked = layer === "L4" && l4Busy;
+  const l7Blocked = layer === "L7" && l7Busy;
+  const layerBlocked = l4Blocked || l7Blocked;
 
   async function launch(e) {
     e.preventDefault();
@@ -163,14 +184,25 @@ export default function Panel() {
       setLaunchError(`Daily limit reached (${maxDailyRuns} attacks/day). Resets at midnight.`);
       return;
     }
+
     // Re-check busy state right before firing
     if (layer === "L4") {
       const { data: busy } = await supabase.rpc("is_l4_busy");
       if (busy) {
         setLaunchError("An L4 attack is already in progress. Wait for it to finish.");
+        setL4Busy(true);
         return;
       }
     }
+    if (layer === "L7") {
+      const { data: busy } = await supabase.rpc("is_l7_busy");
+      if (busy) {
+        setLaunchError("An L7 attack is already in progress. Wait for it to finish.");
+        setL7Busy(true);
+        return;
+      }
+    }
+
     setLaunchError("");
     setLaunchInfo("");
     setLaunching(true);
@@ -230,17 +262,20 @@ export default function Panel() {
       setPort("");
       fetchRuns();
       fetchTodayCount();
-      checkL4Busy();
+      checkBusy();
     }
   }
 
   async function stopRun(id, _table) {
-    // Fire /api/stop/all to every API server simultaneously
-    const { data: apis } = await supabase.from("layer4_apis").select("url");
-    if (apis && apis.length > 0) {
-      await Promise.allSettled(
-        apis.map((api) => fetch(`${api.url}/api/stop/all`, { method: "POST" }))
-      );
+    const layer = _table === "l4_runs" ? "L4" : "L7";
+    // Fire /api/stop/all to every API server simultaneously (L4 only)
+    if (layer === "L4") {
+      const { data: apis } = await supabase.from("layer4_apis").select("url");
+      if (apis && apis.length > 0) {
+        await Promise.allSettled(
+          apis.map((api) => fetch(`${api.url}/api/stop/all`, { method: "POST" }))
+        );
+      }
     }
 
     await supabase
@@ -248,7 +283,7 @@ export default function Panel() {
       .update({ status: "success", stopped_at: new Date().toISOString() })
       .eq("id", id);
     fetchRuns();
-    checkL4Busy();
+    checkBusy();
   }
 
   return (
@@ -276,10 +311,19 @@ export default function Panel() {
         )}
 
         {l4Busy && (
-          <div className="mb-6 flex items-center gap-3 rounded-xl border border-red-500/20 bg-red-500/5 px-4 py-3">
+          <div className="mb-4 flex items-center gap-3 rounded-xl border border-red-500/20 bg-red-500/5 px-4 py-3">
             <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-red-400" />
             <p className="text-sm text-red-300">
               An L4 attack is currently running. New L4 attacks are locked until it finishes.
+            </p>
+          </div>
+        )}
+
+        {l7Busy && (
+          <div className="mb-4 flex items-center gap-3 rounded-xl border border-orange-500/20 bg-orange-500/5 px-4 py-3">
+            <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-orange-400" />
+            <p className="text-sm text-orange-300">
+              An L7 attack is currently running. New L7 attacks are locked until it finishes.
             </p>
           </div>
         )}
@@ -422,11 +466,15 @@ export default function Panel() {
 
                   <button
                     type="submit"
-                    disabled={launching || dailyLimitReached || !method}
+                    disabled={launching || dailyLimitReached || !method || layerBlocked}
                     className="flex w-full items-center justify-center gap-2 rounded-full bg-white px-6 py-2.5 text-sm font-medium text-black ring-1 ring-white/10 transition-colors hover:bg-zinc-200 disabled:opacity-50"
                   >
                     <Play className="h-4 w-4" />
-                    {launching ? "Firing APIs…" : "Launch run"}
+                    {launching
+                      ? "Firing APIs…"
+                      : layerBlocked
+                      ? `${layer} locked — attack in progress`
+                      : "Launch run"}
                   </button>
                 </form>
               )}
@@ -438,7 +486,15 @@ export default function Panel() {
             <div className="rounded-2xl border border-white/[0.08] bg-zinc-900/70 backdrop-blur-sm">
               <div className="flex items-center justify-between border-b border-white/[0.06] px-5 py-4">
                 <h2 className="text-sm font-semibold">Active runs</h2>
-                <span className="font-mono text-[10px] text-muted-foreground">{runs.length} active</span>
+                <div className="flex items-center gap-2">
+                  {/* Real-time concurrent indicators */}
+                  <span className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 font-mono text-[10px] ${l4Busy ? "border-red-500/20 text-red-300" : "border-white/[0.06] text-muted-foreground"}`}>
+                    L4 {l4Busy ? "1/1" : "0/1"}
+                  </span>
+                  <span className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 font-mono text-[10px] ${l7Busy ? "border-orange-500/20 text-orange-300" : "border-white/[0.06] text-muted-foreground"}`}>
+                    L7 {l7Busy ? "1/1" : "0/1"}
+                  </span>
+                </div>
               </div>
               {runs.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-12 text-center">

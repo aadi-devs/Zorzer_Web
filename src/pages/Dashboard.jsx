@@ -14,17 +14,12 @@ import SiteFooter from "@/components/return/SiteFooter";
 import { supabase } from "@/lib/supabaseClient";
 import { useAuth } from "@/lib/AuthContext";
 
-const STATS = [
-  {
-    label: "Concurrent Usage",
-    value: "0 / 1",
-    sub: "Slot active",
-    icon: Activity,
-  },
-  { label: "Plan Duration", value: "600s", sub: "Per run", icon: Gauge },
-  { label: "Plan Layer", value: "L4 / L7", sub: "Active layers", icon: Layers },
-  { label: "Network Uptime", value: "99.98%", sub: "Last 30d", icon: Server },
-];
+const TAG_STYLES = {
+  Update:   "border-white/15 text-zinc-300",
+  Network:  "border-white/15 text-zinc-300",
+  Security: "border-white/15 text-zinc-300",
+  Status:   "border-white/15 text-zinc-300",
+};
 
 const QUICK = [
   {
@@ -41,23 +36,21 @@ const QUICK = [
   },
 ];
 
-const TAG_STYLES = {
-  Update: "border-white/15 text-zinc-300",
-  Network: "border-white/15 text-zinc-300",
-  Security: "border-white/15 text-zinc-300",
-  Status: "border-white/15 text-zinc-300",
-};
-
 function formatDate(iso) {
   const d = new Date(iso);
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
 export default function Dashboard() {
-  const { user } = useAuth();
-  const [news, setNews] = useState([]);
-  const [loadingNews, setLoadingNews] = useState(true);
+  const { user, profile } = useAuth();
+  const plan = profile?.plan || null;
 
+  const [news,          setNews]          = useState([]);
+  const [loadingNews,   setLoadingNews]   = useState(true);
+  const [l4Busy,        setL4Busy]        = useState(false);
+  const [l7Busy,        setL7Busy]        = useState(false);
+
+  // Fetch news
   useEffect(() => {
     async function fetchNews() {
       const { data, error } = await supabase
@@ -71,8 +64,53 @@ export default function Dashboard() {
     fetchNews();
   }, []);
 
+  // Poll concurrent busy state every 5s
+  useEffect(() => {
+    async function checkConcurrent() {
+      const [l4, l7] = await Promise.all([
+        supabase.rpc("is_l4_busy"),
+        supabase.rpc("is_l7_busy"),
+      ]);
+      setL4Busy(!!l4.data);
+      setL7Busy(!!l7.data);
+    }
+    checkConcurrent();
+    const timer = setInterval(checkConcurrent, 5000);
+    return () => clearInterval(timer);
+  }, []);
+
   const displayName =
     user?.user_metadata?.full_name || user?.email?.split("@")[0] || "Operator";
+
+  // Dynamic stat cards
+  const STATS = [
+    {
+      label: "L4 Concurrent",
+      value: l4Busy ? "1 / 1" : "0 / 1",
+      sub:   l4Busy ? "Attack running" : "Slot free",
+      icon:  Activity,
+      live:  l4Busy,
+    },
+    {
+      label: "L7 Concurrent",
+      value: l7Busy ? "1 / 1" : "0 / 1",
+      sub:   l7Busy ? "Attack running" : "Slot free",
+      icon:  Layers,
+      live:  l7Busy,
+    },
+    {
+      label: "Plan Duration",
+      value: plan ? `${plan.max_duration}s` : "—",
+      sub:   "Max per run",
+      icon:  Gauge,
+    },
+    {
+      label: "Network Uptime",
+      value: "99.98%",
+      sub:   "Last 30d",
+      icon:  Server,
+    },
+  ];
 
   return (
     <div className="relative z-10">
@@ -95,15 +133,24 @@ export default function Dashboard() {
           {STATS.map((s) => (
             <div
               key={s.label}
-              className="group relative overflow-hidden rounded-2xl border border-white/[0.08] bg-zinc-900/70 p-5 ring-1 ring-white/[0.03] backdrop-blur-sm transition-colors hover:border-white/[0.14]"
+              className={`group relative overflow-hidden rounded-2xl border bg-zinc-900/70 p-5 ring-1 backdrop-blur-sm transition-colors ${
+                s.live
+                  ? "border-red-500/20 ring-red-500/5 hover:border-red-500/30"
+                  : "border-white/[0.08] ring-white/[0.03] hover:border-white/[0.14]"
+              }`}
             >
               <div className="flex items-center justify-between">
                 <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-white/[0.04] ring-1 ring-white/10">
-                  <s.icon className="h-4 w-4 text-zinc-400" />
+                  <s.icon className={`h-4 w-4 ${s.live ? "text-red-400" : "text-zinc-400"}`} />
                 </span>
-                <ArrowUpRight className="h-4 w-4 text-muted-foreground/50" />
+                {s.live && (
+                  <span className="h-2 w-2 animate-pulse rounded-full bg-red-400" />
+                )}
+                {!s.live && (
+                  <ArrowUpRight className="h-4 w-4 text-muted-foreground/50" />
+                )}
               </div>
-              <p className="mt-4 font-mono text-2xl font-medium tracking-tight">
+              <p className={`mt-4 font-mono text-2xl font-medium tracking-tight ${s.live ? "text-red-300" : ""}`}>
                 {s.value}
               </p>
               <p className="mt-1 text-sm font-medium">{s.label}</p>
@@ -172,15 +219,27 @@ export default function Dashboard() {
               <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
                 Plan snapshot
               </span>
-              <p className="mt-2 font-heading text-2xl font-semibold">
-                Stresser
-              </p>
-              <div className="mt-4 space-y-3 text-sm">
-                <Row label="Concurrent" value="1 slot" />
-                <Row label="Max duration" value="600s" />
-                <Row label="Methods" value="L4 + L7" />
-                <Row label="Renews" value="Aug 18" />
-              </div>
+              {plan ? (
+                <>
+                  <p className="mt-2 font-heading text-2xl font-semibold">
+                    {plan.name}
+                  </p>
+                  <div className="mt-4 space-y-3 text-sm">
+                    <Row label="Concurrent" value="1 slot" />
+                    <Row label="Max duration" value={`${plan.max_duration}s`} />
+                    <Row
+                      label="Methods"
+                      value={(plan.access_layers || []).join(" + ") || "—"}
+                    />
+                    <Row
+                      label="Daily limit"
+                      value={plan.max_daily_runs === 0 ? "Unlimited" : `${plan.max_daily_runs} runs`}
+                    />
+                  </div>
+                </>
+              ) : (
+                <p className="mt-3 text-sm text-muted-foreground">No plan assigned.</p>
+              )}
               <Link
                 to="/pricing"
                 className="mt-5 inline-flex w-full items-center justify-center rounded-full bg-white px-4 py-2 text-xs font-medium text-black ring-1 ring-white/10 transition-colors hover:bg-zinc-200"
