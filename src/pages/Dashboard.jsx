@@ -15,22 +15,37 @@ import { supabase } from "@/lib/supabaseClient";
 import { useAuth } from "@/lib/AuthContext";
 
 const STATS = [
-  { label: "Concurrent Usage", value: "1 / 1", sub: "Slot active", icon: Activity },
+  {
+    label: "Concurrent Usage",
+    value: "0 / 1",
+    sub: "Slot active",
+    icon: Activity,
+  },
   { label: "Plan Duration", value: "600s", sub: "Per run", icon: Gauge },
   { label: "Plan Layer", value: "L4 / L7", sub: "Active layers", icon: Layers },
   { label: "Network Uptime", value: "99.98%", sub: "Last 30d", icon: Server },
 ];
 
 const QUICK = [
-  { to: "/panel", label: "Open Panel", desc: "Launch & monitor runs", icon: Crosshair },
-  { to: "/pricing", label: "Upgrade Plan", desc: "Unlock more methods", icon: CreditCard },
+  {
+    to: "/panel",
+    label: "Open Panel",
+    desc: "Launch & monitor runs",
+    icon: Crosshair,
+  },
+  {
+    to: "/pricing",
+    label: "Upgrade Plan",
+    desc: "Unlock more methods",
+    icon: CreditCard,
+  },
 ];
 
 const TAG_STYLES = {
-  Update:   "border-white/15 text-zinc-300",
-  Network:  "border-white/15 text-zinc-300",
+  Update: "border-white/15 text-zinc-300",
+  Network: "border-white/15 text-zinc-300",
   Security: "border-white/15 text-zinc-300",
-  Status:   "border-white/15 text-zinc-300",
+  Status: "border-white/15 text-zinc-300",
 };
 
 function formatDate(iso) {
@@ -56,7 +71,8 @@ export default function Dashboard() {
     fetchNews();
   }, []);
 
-  const displayName = user?.user_metadata?.full_name || user?.email?.split("@")[0] || "Operator";
+  const displayName =
+    user?.user_metadata?.full_name || user?.email?.split("@")[0] || "Operator";
 
   return (
     <div className="relative z-10">
@@ -69,7 +85,8 @@ export default function Dashboard() {
             Welcome back{displayName ? `, ${displayName}` : ""}
           </h1>
           <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
-            The Best And Most Powerful Layer 4 And Layer 7 Stress Tester Available In The Market Till Date
+            The Best And Most Powerful Layer 4 And Layer 7 Stress Tester
+            Available In The Market Till Date
           </p>
         </header>
 
@@ -86,7 +103,9 @@ export default function Dashboard() {
                 </span>
                 <ArrowUpRight className="h-4 w-4 text-muted-foreground/50" />
               </div>
-              <p className="mt-4 font-mono text-2xl font-medium tracking-tight">{s.value}</p>
+              <p className="mt-4 font-mono text-2xl font-medium tracking-tight">
+                {s.value}
+              </p>
               <p className="mt-1 text-sm font-medium">{s.label}</p>
               <p className="text-xs text-muted-foreground">{s.sub}</p>
             </div>
@@ -99,7 +118,9 @@ export default function Dashboard() {
             <div className="rounded-2xl border border-white/[0.08] bg-zinc-900/70 backdrop-blur-sm">
               <div className="flex items-center justify-between border-b border-white/[0.06] px-5 py-4">
                 <h2 className="text-sm font-semibold">Platform news</h2>
-                <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Latest</span>
+                <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                  Latest
+                </span>
               </div>
               {loadingNews ? (
                 <div className="flex items-center justify-center py-12 text-xs text-muted-foreground">
@@ -112,9 +133,14 @@ export default function Dashboard() {
               ) : (
                 <ul className="divide-y divide-white/[0.05]">
                   {news.map((n) => (
-                    <li key={n.id} className="flex gap-4 px-5 py-4 transition-colors hover:bg-white/[0.02]">
+                    <li
+                      key={n.id}
+                      className="flex gap-4 px-5 py-4 transition-colors hover:bg-white/[0.02]"
+                    >
                       <div className="flex w-12 shrink-0 flex-col items-center">
-                        <span className="font-mono text-xs text-muted-foreground">{formatDate(n.created_at)}</span>
+                        <span className="font-mono text-xs text-muted-foreground">
+                          {formatDate(n.created_at)}
+                        </span>
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
@@ -125,9 +151,13 @@ export default function Dashboard() {
                           >
                             {n.tag}
                           </span>
-                          <h3 className="truncate text-sm font-medium">{n.title}</h3>
+                          <h3 className="truncate text-sm font-medium">
+                            {n.title}
+                          </h3>
                         </div>
-                        <p className="mt-1 text-xs text-muted-foreground">{n.body}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {n.body}
+                        </p>
                       </div>
                     </li>
                   ))}
@@ -142,7 +172,9 @@ export default function Dashboard() {
               <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
                 Plan snapshot
               </span>
-              <p className="mt-2 font-heading text-2xl font-semibold">Stresser</p>
+              <p className="mt-2 font-heading text-2xl font-semibold">
+                Stresser
+              </p>
               <div className="mt-4 space-y-3 text-sm">
                 <Row label="Concurrent" value="1 slot" />
                 <Row label="Max duration" value="600s" />

@@ -84,6 +84,7 @@ export default function Panel() {
   }, [user]);
 
   async function fetchRuns() {
+    const now = Date.now();
     const [{ data: l4Data }, { data: l7Data }] = await Promise.all([
       supabase
         .from("l4_runs")
@@ -91,20 +92,42 @@ export default function Panel() {
         .eq("user_id", user.id)
         .in("status", ["running", "queued"])
         .order("created_at", { ascending: false })
-        .limit(10),
+        .limit(20),
       supabase
         .from("l7_runs")
         .select("*")
         .eq("user_id", user.id)
         .in("status", ["running", "queued"])
         .order("created_at", { ascending: false })
-        .limit(10),
+        .limit(20),
     ]);
-    const combined = [
+
+    const all = [
       ...(l4Data || []).map(r => ({ ...r, layer: "L4", _table: "l4_runs" })),
       ...(l7Data || []).map(r => ({ ...r, layer: "L7", _table: "l7_runs" })),
-    ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 10);
-    setRuns(combined);
+    ];
+
+    // Auto-expire runs whose duration window has passed
+    const expired = all.filter(r =>
+      r.started_at && new Date(r.started_at).getTime() + r.duration * 1000 <= now
+    );
+    if (expired.length > 0) {
+      await Promise.all(
+        expired.map(r =>
+          supabase.from(r._table)
+            .update({ status: "success", stopped_at: new Date().toISOString() })
+            .eq("id", r.id)
+        )
+      );
+      checkL4Busy();
+    }
+
+    const expiredIds = new Set(expired.map(r => r.id));
+    const active = all
+      .filter(r => !expiredIds.has(r.id))
+      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+      .slice(0, 10);
+    setRuns(active);
   }
 
   async function fetchTodayCount() {
