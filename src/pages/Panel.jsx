@@ -245,12 +245,15 @@ export default function Panel() {
     // ── Save run record ─────────────────────────────────────────────────
     const table = layer === "L4" ? "l4_runs" : "l7_runs";
     const hasApiHit = Object.keys(apiInstances).length > 0;
+    // If no API responded the attack never actually started → save as "failed"
+    // so is_l4_busy / is_l7_busy don't block the next attempt.
+    const runStatus = hasApiHit ? "running" : (layer === "L4" && (method === "UDP-NORMAL" || method === "UDP-BYPASS") ? "failed" : "queued");
     const { error } = await supabase.from(table).insert({
       user_id:    user.id,
       target:     target.trim(),
       method,
       duration,
-      status:     hasApiHit ? "running" : "queued",
+      status:     runStatus,
       started_at: hasApiHit ? new Date().toISOString() : null,
     });
 
