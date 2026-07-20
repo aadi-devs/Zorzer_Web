@@ -458,8 +458,9 @@ export default function Panel() {
 
                   {/* Domain — L4 only, mandatory, stored for record-keeping */}
                   {layer === "L4" && (
-                    <Field label="Domain (optional)">
+                    <Field label="Domain">
                       <input
+                        required
                         type="text"
                         value={domain}
                         onChange={(e) => setDomain(e.target.value)}
