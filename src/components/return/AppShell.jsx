@@ -25,7 +25,6 @@ const NAV = [
   { to: "/panel",     label: "Panel",     icon: Crosshair },
   { to: "/pricing",   label: "Plans",     icon: CreditCard },
   { to: "/profile",   label: "Profile",   icon: User },
-  { to: "/activity",  label: "Activity",  icon: History },
   { to: "/settings",  label: "Settings",  icon: SettingsIcon },
   { to: "/feedback",  label: "Feedback",  icon: MessageSquare },
 ];
@@ -213,6 +212,10 @@ function SidebarContent({ linkClass, logout, isAdmin, displayName, email, onNavi
             <NavLink to="/admin/feedback" className={linkClass} onClick={onNavigate}>
               <Inbox className="h-4 w-4 text-amber-400" />
               <span className="text-amber-400">Feedback inbox</span>
+            </NavLink>
+            <NavLink to="/activity" className={linkClass} onClick={onNavigate}>
+              <History className="h-4 w-4 text-amber-400" />
+              <span className="text-amber-400">Activity</span>
             </NavLink>
           </>
         )}

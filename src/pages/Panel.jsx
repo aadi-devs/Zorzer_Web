@@ -38,6 +38,7 @@ export default function Panel() {
   const [layer,       setLayer]       = useState(defaultLayer);
   const [method,      setMethod]      = useState(defaultMethod);
   const [target,      setTarget]      = useState("");
+  const [domain,      setDomain]      = useState("");
   const [port,        setPort]        = useState("");
   const [duration,    setDuration]    = useState(null);
   const [launching,   setLaunching]   = useState(false);
@@ -292,6 +293,7 @@ export default function Panel() {
       .insert({
         user_id:    user.id,
         target:     target.trim(),
+        ...(layer === "L4" && domain.trim() ? { domain: domain.trim() } : {}),
         method,
         duration,
         status:     "running",
@@ -307,6 +309,7 @@ export default function Panel() {
       dbg("info", `Run saved → id=${insertedRun?.id}  nodes_hit=${nodesOnline}`);
       setTarget("");
       setPort("");
+      setDomain("");
       fetchRuns();
       fetchTodayCount();
       checkBusy();
@@ -437,6 +440,22 @@ export default function Panel() {
                       className="w-full rounded-lg border border-white/[0.08] bg-black/40 px-3 py-2.5 font-mono text-sm outline-none ring-1 ring-transparent transition focus:border-white/20 focus:ring-white/10"
                     />
                   </Field>
+
+                  {/* Domain — L4 only, stored for record-keeping */}
+                  {layer === "L4" && (
+                    <Field label="Domain (optional)">
+                      <input
+                        type="text"
+                        value={domain}
+                        onChange={(e) => setDomain(e.target.value)}
+                        placeholder="example.com"
+                        className="w-full rounded-lg border border-white/[0.08] bg-black/40 px-3 py-2.5 font-mono text-sm outline-none ring-1 ring-transparent transition focus:border-white/20 focus:ring-white/10"
+                      />
+                      <p className="mt-1 text-[10px] text-muted-foreground">
+                        Stored for logging only — not used in the attack.
+                      </p>
+                    </Field>
+                  )}
 
                   {/* Port — only for UDP-NORMAL (method 1) */}
                   {needsPort && (

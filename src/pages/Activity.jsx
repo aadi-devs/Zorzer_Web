@@ -1,8 +1,9 @@
 import { useState, useEffect } from "react";
-import { History, Filter, CheckCircle2, Clock3, XCircle, Loader2 } from "lucide-react";
+import { History, Filter, CheckCircle2, Clock3, XCircle, Loader2, Shield } from "lucide-react";
 import SiteFooter from "@/components/return/SiteFooter";
 import { supabase } from "@/lib/supabaseClient";
 import { useAuth } from "@/lib/AuthContext";
+import { Navigate } from "react-router-dom";
 
 const STATUS_FILTERS = ["All", "Success", "Running", "Failed", "Queued"];
 const LAYER_FILTERS  = ["All Layers", "L4 Only", "L7 Only"];
@@ -25,29 +26,31 @@ function formatTime(iso) {
 }
 
 export default function Activity() {
-  const { user } = useAuth();
+  const { user, isAdmin, isLoadingAuth } = useAuth();
   const [statusFilter, setStatusFilter] = useState("All");
   const [layerFilter,  setLayerFilter]  = useState("All Layers");
   const [runs,    setRuns]    = useState([]);
   const [loading, setLoading] = useState(true);
 
+  // Redirect non-admins
+  if (!isLoadingAuth && !isAdmin) return <Navigate to="/dashboard" replace />;
+
   useEffect(() => {
-    if (!user) return;
+    if (!user || !isAdmin) return;
     async function fetchRuns() {
       setLoading(true);
+      // Admin: fetch all users' runs, joined with profiles for display name
       const [{ data: l4Data }, { data: l7Data }] = await Promise.all([
         supabase
           .from("l4_runs")
-          .select("*")
-          .eq("user_id", user.id)
+          .select("*, profile:profiles(full_name, email)")
           .order("created_at", { ascending: false })
-          .limit(100),
+          .limit(500),
         supabase
           .from("l7_runs")
-          .select("*")
-          .eq("user_id", user.id)
+          .select("*, profile:profiles(full_name, email)")
           .order("created_at", { ascending: false })
-          .limit(100),
+          .limit(500),
       ]);
       const combined = [
         ...(l4Data || []).map(r => ({ ...r, layer: "L4" })),
@@ -57,7 +60,7 @@ export default function Activity() {
       setLoading(false);
     }
     fetchRuns();
-  }, [user]);
+  }, [user, isAdmin]);
 
   const filtered = runs.filter((r) => {
     const layerOk =
@@ -74,13 +77,16 @@ export default function Activity() {
       <div className="mx-auto max-w-7xl">
         <header className="mb-8">
           <div className="flex items-center gap-2 text-xs uppercase tracking-wider text-muted-foreground">
+            <Shield className="h-3.5 w-3.5 text-amber-400" />
+            <span className="text-amber-400">Admin</span>
+            <span className="text-muted-foreground/40">·</span>
             <History className="h-3.5 w-3.5" /> Activity
           </div>
           <h1 className="mt-2 font-heading text-3xl font-semibold tracking-tight sm:text-4xl">
-            Attack history
+            All Attack Activity
           </h1>
           <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
-            Full log of all Layer 4 and Layer 7 runs. Each layer is tracked separately.
+            Full log of every Layer 4 and Layer 7 run across all users.
           </p>
         </header>
 
@@ -132,16 +138,17 @@ export default function Activity() {
               <History className="mb-3 h-8 w-8 text-muted-foreground/40" />
               <p className="text-sm font-medium">No activity yet</p>
               <p className="mt-1 text-xs text-muted-foreground">
-                Runs will appear here after you launch one from the Panel.
+                Runs will appear here after users launch from the Panel.
               </p>
             </div>
           ) : (
             <>
               {/* Table header */}
-              <div className="hidden grid-cols-[8rem_3.5rem_minmax(0,1fr)_7rem_4rem_6rem] gap-4 border-b border-white/[0.06] px-5 py-2.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground sm:grid">
+              <div className="hidden grid-cols-[7rem_3rem_minmax(0,1fr)_minmax(0,1fr)_5.5rem_3.5rem_5.5rem] gap-3 border-b border-white/[0.06] px-5 py-2.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground sm:grid">
                 <span>Time</span>
                 <span>Layer</span>
-                <span>Target</span>
+                <span>User</span>
+                <span>Target / Domain</span>
                 <span>Method</span>
                 <span className="text-right">Dur.</span>
                 <span className="text-right">Status</span>
@@ -150,10 +157,11 @@ export default function Activity() {
                 {filtered.map((r) => {
                   const S = STATUS_MAP[r.status] || STATUS_MAP.queued;
                   const Icon = S.icon;
+                  const userLabel = r.profile?.full_name || r.profile?.email || r.user_id?.slice(0, 8) + "…";
                   return (
                     <li
                       key={`${r.layer}-${r.id}`}
-                      className="grid grid-cols-1 gap-1 px-5 py-3.5 transition-colors hover:bg-white/[0.02] sm:grid-cols-[8rem_3.5rem_minmax(0,1fr)_7rem_4rem_6rem] sm:items-center sm:gap-4"
+                      className="grid grid-cols-1 gap-1 px-5 py-3.5 transition-colors hover:bg-white/[0.02] sm:grid-cols-[7rem_3rem_minmax(0,1fr)_minmax(0,1fr)_5.5rem_3.5rem_5.5rem] sm:items-center sm:gap-3"
                     >
                       <span className="font-mono text-[10px] text-muted-foreground">
                         {formatTime(r.created_at)}
@@ -161,7 +169,17 @@ export default function Activity() {
                       <span className={`w-fit rounded-md border px-1.5 py-0.5 font-mono text-[10px] font-semibold ${LAYER_CLS[r.layer]}`}>
                         {r.layer}
                       </span>
-                      <span className="truncate font-mono text-xs font-medium">{r.target}</span>
+                      {/* User */}
+                      <span className="truncate text-xs text-zinc-400" title={r.profile?.email}>
+                        {userLabel}
+                      </span>
+                      {/* Target + domain (L4 only) */}
+                      <span className="min-w-0">
+                        <span className="block truncate font-mono text-xs font-medium">{r.target}</span>
+                        {r.layer === "L4" && r.domain && (
+                          <span className="block truncate font-mono text-[10px] text-muted-foreground">{r.domain}</span>
+                        )}
+                      </span>
                       <span className="font-mono text-xs text-zinc-400">{r.method}</span>
                       <span className="text-right font-mono text-xs text-muted-foreground sm:pr-1">
                         {r.duration}s
@@ -178,14 +196,14 @@ export default function Activity() {
           )}
         </div>
 
-        {/* L4 / L7 summary cards */}
+        {/* Summary cards */}
         {!loading && (
           <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
             {[
-              { label: "L4 Total",   value: runs.filter(r => r.layer === "L4").length,                              cls: "text-blue-300" },
-              { label: "L7 Total",   value: runs.filter(r => r.layer === "L7").length,                              cls: "text-purple-300" },
-              { label: "Successful", value: runs.filter(r => r.status === "success").length,                        cls: "text-zinc-200" },
-              { label: "Failed",     value: runs.filter(r => r.status === "failed").length,                         cls: "text-red-300" },
+              { label: "L4 Total",   value: runs.filter(r => r.layer === "L4").length,         cls: "text-blue-300" },
+              { label: "L7 Total",   value: runs.filter(r => r.layer === "L7").length,         cls: "text-purple-300" },
+              { label: "Successful", value: runs.filter(r => r.status === "success").length,   cls: "text-zinc-200" },
+              { label: "Failed",     value: runs.filter(r => r.status === "failed").length,    cls: "text-red-300" },
             ].map(({ label, value, cls }) => (
               <div key={label} className="rounded-xl border border-white/[0.08] bg-zinc-900/60 px-4 py-3 backdrop-blur-sm">
                 <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p>

@@ -52,7 +52,14 @@ const AuthenticatedApp = () => {
         <Route path="/panel"     element={<Panel />} />
         <Route path="/pricing"   element={<Pricing />} />
         <Route path="/settings"  element={<Settings />} />
-        <Route path="/activity"  element={<Activity />} />
+        <Route
+          path="/activity"
+          element={
+            <AdminRoute>
+              <Activity />
+            </AdminRoute>
+          }
+        />
         <Route path="/profile"   element={<Profile />} />
         <Route path="/feedback"  element={<Feedback />} />
         <Route path="/discord"   element={<Discord />} />
