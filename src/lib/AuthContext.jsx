@@ -53,7 +53,27 @@ export const AuthProvider = ({ children }) => {
     return data.user;
   };
 
-  // register is intentionally not exposed — accounts are created by admin only
+  const register = async (email, password, fullName = "") => {
+    const { data, error } = await supabase.auth.signUp({ email, password });
+    if (error) throw new Error(error.message);
+
+    // Insert profile row with no plan assigned (plan_id stays null)
+    if (data.user) {
+      await supabase.from("profiles").upsert(
+        {
+          id:        data.user.id,
+          email:     data.user.email,
+          full_name: fullName || null,
+          plan_id:   null,
+          is_admin:  false,
+        },
+        { onConflict: "id", ignoreDuplicates: true }
+      );
+    }
+
+    return data;
+  };
+
   const logout = async () => {
     await supabase.auth.signOut();
     window.location.href = '/login';

@@ -16,6 +16,7 @@ import Feedback from '@/pages/Feedback';
 import Discord from '@/pages/Discord';
 import Admin from '@/pages/Admin';
 import Login from '@/pages/Login';
+import Register from '@/pages/Register';
 import ForgotPassword from '@/pages/ForgotPassword';
 import ResetPassword from '@/pages/ResetPassword';
 
@@ -76,8 +77,7 @@ function App() {
           <ScrollToTop />
           <Routes>
             <Route path="/login"          element={<Login />} />
-            {/* /register is permanently closed — redirect anyone who visits */}
-            <Route path="/register"       element={<Navigate to="/login" replace />} />
+            <Route path="/register"       element={<Register />} />
             <Route path="/forgot-password" element={<ForgotPassword />} />
             <Route path="/reset-password" element={<ResetPassword />} />
             <Route path="/*"              element={<AuthenticatedApp />} />

@@ -4,39 +4,74 @@ import { useAuth } from "@/lib/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { UserPlus, Mail, Lock, Loader2 } from "lucide-react";
+import { UserPlus, Mail, Lock, User, Loader2, CheckCircle } from "lucide-react";
 import AuthLayout from "@/components/AuthLayout";
 
 export default function Register() {
   const { register } = useAuth();
   const navigate = useNavigate();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+
+  const [fullName,        setFullName]        = useState("");
+  const [email,           setEmail]           = useState("");
+  const [password,        setPassword]        = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [error,           setError]           = useState("");
+  const [loading,         setLoading]         = useState(false);
+  const [emailSent,       setEmailSent]       = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
+
     if (password !== confirmPassword) {
-      setError("Passwords do not match");
+      setError("Passwords do not match.");
       return;
     }
     if (password.length < 6) {
-      setError("Password must be at least 6 characters");
+      setError("Password must be at least 6 characters.");
       return;
     }
+
     setLoading(true);
     try {
-      register(email, password);
-      navigate("/", { replace: true });
+      const data = await register(email, password, fullName);
+      // Supabase may require email confirmation depending on project settings.
+      // If the session is immediately available the user is logged in; otherwise
+      // show a "check your email" screen.
+      if (data?.session) {
+        navigate("/", { replace: true });
+      } else {
+        setEmailSent(true);
+      }
     } catch (err) {
-      setError(err.message || "Registration failed");
+      setError(err.message || "Registration failed. Please try again.");
     } finally {
       setLoading(false);
     }
   };
+
+  if (emailSent) {
+    return (
+      <AuthLayout
+        icon={CheckCircle}
+        title="Check your email"
+        subtitle={`We sent a confirmation link to ${email}`}
+        footer={
+          <>
+            Already confirmed?{" "}
+            <Link to="/login" className="font-medium text-primary hover:underline">
+              Log in
+            </Link>
+          </>
+        }
+      >
+        <p className="text-center text-sm text-muted-foreground">
+          Click the link in the email to activate your account, then come back and log in.
+          Your account has no plan assigned — an admin will upgrade you once verified.
+        </p>
+      </AuthLayout>
+    );
+  }
 
   return (
     <AuthLayout
@@ -46,40 +81,60 @@ export default function Register() {
       footer={
         <>
           Already have an account?{" "}
-          <Link to="/login" className="text-primary font-medium hover:underline">
+          <Link to="/login" className="font-medium text-primary hover:underline">
             Log in
           </Link>
         </>
       }
     >
       {error && (
-        <div className="mb-4 p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-sm">
+        <div className="mb-4 rounded-lg border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive">
           {error}
         </div>
       )}
 
       <form onSubmit={handleSubmit} className="space-y-4">
+        {/* Full name (optional) */}
+        <div className="space-y-2">
+          <Label htmlFor="fullName">Full name <span className="text-muted-foreground">(optional)</span></Label>
+          <div className="relative">
+            <User className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              id="fullName"
+              type="text"
+              autoComplete="name"
+              autoFocus
+              placeholder="John Doe"
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
+              className="h-12 pl-10"
+            />
+          </div>
+        </div>
+
+        {/* Email */}
         <div className="space-y-2">
           <Label htmlFor="email">Email</Label>
           <div className="relative">
-            <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" aria-hidden="true" />
+            <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               id="email"
               type="email"
               autoComplete="email"
-              autoFocus
               placeholder="you@example.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="pl-10 h-12"
+              className="h-12 pl-10"
               required
             />
           </div>
         </div>
+
+        {/* Password */}
         <div className="space-y-2">
           <Label htmlFor="password">Password</Label>
           <div className="relative">
-            <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" aria-hidden="true" />
+            <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               id="password"
               type="password"
@@ -87,15 +142,17 @@ export default function Register() {
               placeholder="••••••••"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="pl-10 h-12"
+              className="h-12 pl-10"
               required
             />
           </div>
         </div>
+
+        {/* Confirm password */}
         <div className="space-y-2">
-          <Label htmlFor="confirm">Confirm Password</Label>
+          <Label htmlFor="confirm">Confirm password</Label>
           <div className="relative">
-            <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" aria-hidden="true" />
+            <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               id="confirm"
               type="password"
@@ -103,16 +160,17 @@ export default function Register() {
               placeholder="••••••••"
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
-              className="pl-10 h-12"
+              className="h-12 pl-10"
               required
             />
           </div>
         </div>
-        <Button type="submit" className="w-full h-12 font-medium" disabled={loading}>
+
+        <Button type="submit" className="h-12 w-full font-medium" disabled={loading}>
           {loading ? (
             <>
-              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-              Creating account...
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Creating account…
             </>
           ) : (
             "Create account"

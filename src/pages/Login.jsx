@@ -34,6 +34,14 @@ export default function Login() {
       icon={LogIn}
       title="Welcome back"
       subtitle="Log in to your account"
+      footer={
+        <>
+          Don't have an account?{" "}
+          <Link to="/register" className="font-medium text-primary hover:underline">
+            Sign up
+          </Link>
+        </>
+      }
     >
       {error && (
         <div className="mb-4 rounded-lg border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive">
