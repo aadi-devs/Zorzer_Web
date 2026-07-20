@@ -1,5 +1,5 @@
 import express from "express";
-import { randomUUID } from "crypto";
+import { createHmac, timingSafeEqual } from "crypto";
 import { createClient } from "@supabase/supabase-js";
 
 const app = express();
@@ -7,9 +7,14 @@ app.use(express.json());
 
 const SUPABASE_URL         = process.env.VITE_SUPABASE_URL || "https://fyzbqbubsdkjrmppkdsl.supabase.co";
 const SUPABASE_SERVICE_KEY = process.env.VITE_SUPABASE_SERVICE_KEY;
+const SESSION_SECRET       = process.env.SESSION_SECRET;
 
 if (!SUPABASE_SERVICE_KEY) {
-  console.error("[proxy] FATAL: VITE_SUPABASE_SERVICE_KEY is not set — server cannot start safely.");
+  console.error("[proxy] FATAL: VITE_SUPABASE_SERVICE_KEY is not set.");
+  process.exit(1);
+}
+if (!SESSION_SECRET) {
+  console.error("[proxy] FATAL: SESSION_SECRET is not set.");
   process.exit(1);
 }
 
@@ -20,29 +25,48 @@ const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
 const L4_METHODS = new Set(["UDP-NORMAL", "UDP-BYPASS", "ICMP"]);
 const L7_METHODS = new Set(["HTTP-GET", "HTTP-POST", "API-FLOOD", "RAPID-RESET"]);
 
-// ── Single-use launch tokens (anti-replay) ────────────────────────────────────
-// Prevents copying a DevTools request and replaying it outside the website.
-// Each token is tied to a user, expires in 30 s, and is deleted on first use.
-const launchTokens = new Map(); // Map<token, { userId, expiresAt }>
+// ── HMAC launch tokens (anti-replay, serverless-compatible) ───────────────────
+// Stateless: no in-memory store needed, works across serverless instances.
+// Token = base64url( userId|timestamp|hmac-sha256 )
+// Tied to user + expires in 30 s. Copying a DevTools payload is useless after expiry.
 const TOKEN_TTL_MS = 30_000;
 
-setInterval(() => {
-  const now = Date.now();
-  for (const [tok, meta] of launchTokens)
-    if (meta.expiresAt <= now) launchTokens.delete(tok);
-}, 60_000);
+function generateLaunchToken(userId) {
+  const data = `${userId}|${Date.now()}`;
+  const sig  = createHmac("sha256", SESSION_SECRET).update(data).digest("hex");
+  return Buffer.from(`${data}|${sig}`).toString("base64url");
+}
 
-function consumeLaunchToken(token, userId) {
-  if (!token) return { ok: false, reason: "Missing launch token — request one first" };
-  const meta = launchTokens.get(token);
-  if (!meta)              return { ok: false, reason: "Invalid or already-used launch token" };
-  if (meta.expiresAt <= Date.now()) {
-    launchTokens.delete(token);
-    return { ok: false, reason: "Launch token expired — request a new one" };
+function consumeLaunchToken(rawToken, userId) {
+  if (!rawToken) return { ok: false, reason: "Missing launch token — request one first" };
+  try {
+    const decoded = Buffer.from(rawToken, "base64url").toString("utf8");
+    const lastBar = decoded.lastIndexOf("|");
+    if (lastBar === -1) return { ok: false, reason: "Malformed launch token" };
+    const sig  = decoded.slice(lastBar + 1);
+    const data = decoded.slice(0, lastBar);
+    const [tokenUserId, tsStr] = data.split("|");
+    if (!tokenUserId || !tsStr) return { ok: false, reason: "Malformed launch token" };
+
+    // Timing-safe HMAC verification (prevents timing attacks)
+    const expectedSig = createHmac("sha256", SESSION_SECRET).update(data).digest("hex");
+    const sBuf = Buffer.from(sig,         "hex");
+    const eBuf = Buffer.from(expectedSig, "hex");
+    if (sBuf.length !== eBuf.length || !timingSafeEqual(sBuf, eBuf))
+      return { ok: false, reason: "Invalid launch token" };
+
+    // Expiry
+    const ts = parseInt(tsStr, 10);
+    if (isNaN(ts) || Date.now() - ts > TOKEN_TTL_MS)
+      return { ok: false, reason: "Launch token expired — request a new one" };
+
+    // User binding
+    if (tokenUserId !== userId) return { ok: false, reason: "Launch token user mismatch" };
+
+    return { ok: true };
+  } catch {
+    return { ok: false, reason: "Invalid launch token" };
   }
-  if (meta.userId !== userId) return { ok: false, reason: "Launch token user mismatch" };
-  launchTokens.delete(token); // single-use: consume immediately
-  return { ok: true };
 }
 
 // ── Auth middleware — verify JWT and load profile ─────────────────────────────
@@ -74,13 +98,20 @@ function requireAdmin(req, res, next) {
 }
 
 // ── GET /proxy/launch-token ───────────────────────────────────────────────────
-// Issues a single-use, 30 s token tied to the authenticated user.
-// The /l4/start and /l7/start endpoints require and consume this token,
-// so a payload copied from DevTools cannot be replayed.
-app.get("/proxy/launch-token", requireAuth, (_req, res) => {
-  const token = randomUUID();
-  launchTokens.set(token, { userId: _req.user.id, expiresAt: Date.now() + TOKEN_TTL_MS });
+app.get("/proxy/launch-token", requireAuth, (req, res) => {
+  const token = generateLaunchToken(req.user.id);
   res.json({ token, expiresIn: TOKEN_TTL_MS / 1000 });
+});
+
+// ── GET /proxy/__cron ─────────────────────────────────────────────────────────
+// Called by Vercel Cron every 2 min to expire stale runs.
+// Set CRON_SECRET env var on Vercel and configure vercel.json headers accordingly.
+app.get("/proxy/__cron", async (req, res) => {
+  const provided = req.headers["x-cron-secret"] ?? req.query.secret;
+  if (!process.env.CRON_SECRET || provided !== process.env.CRON_SECRET)
+    return res.status(401).json({ error: "Unauthorized" });
+  await cleanupExpiredRuns();
+  res.json({ ok: true });
 });
 
 // ── Policy check ──────────────────────────────────────────────────────────────
@@ -373,7 +404,14 @@ async function cleanupExpiredRuns() {
     console.error("[cleanup] Unhandled error:", err.message);
   }
 }
-setInterval(cleanupExpiredRuns, 30000);
+// ── Entry point ───────────────────────────────────────────────────────────────
+// When run directly (Replit dev): start the HTTP server + cleanup interval.
+// When imported by Vercel: just export the app — the runtime handles listening.
+const isMain = process.argv[1] && new URL(import.meta.url).pathname === process.argv[1];
+if (isMain) {
+  setInterval(cleanupExpiredRuns, 30_000);
+  const PORT = process.env.PORT || 3001;
+  app.listen(PORT, () => console.log(`[proxy] Server running on port ${PORT}`));
+}
 
-const PORT = 3001;
-app.listen(PORT, () => console.log(`[proxy] Server running on port ${PORT}`));
+export default app;

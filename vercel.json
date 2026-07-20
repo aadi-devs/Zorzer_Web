@@ -1,0 +1,11 @@
+{
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "rewrites": [
+    { "source": "/proxy/:path*", "destination": "/api/index" },
+    { "source": "/(.*)",         "destination": "/index.html" }
+  ],
+  "crons": [
+    { "path": "/proxy/__cron?secret=YOUR_CRON_SECRET", "schedule": "*/5 * * * *" }
+  ]
+}
