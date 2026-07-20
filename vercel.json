@@ -7,6 +7,6 @@
     { "source": "/(.*)",         "destination": "/index.html" }
   ],
   "crons": [
-    { "path": "/proxy/__cron?secret=YOUR_CRON_SECRET", "schedule": "0 0 * * *" }
+    { "path": "/proxy/__cron?secret=FpbYSE50tedmB-BkVMRUrcX9GICt_V5R", "schedule": "0 0 * * *" }
   ]
 }
