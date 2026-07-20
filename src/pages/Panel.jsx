@@ -304,7 +304,7 @@ export default function Panel() {
           headers: proxyHeaders,
           body:    JSON.stringify({
             target:       target.trim(),
-            method:       method.toLowerCase().replace(/-/g, ""),
+            method:       method,
             duration,
             workers:      2048,
             rate_delay:   0,
