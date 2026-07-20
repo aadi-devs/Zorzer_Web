@@ -11,15 +11,20 @@ const L7_METHOD_SET = new Set(["HTTP-GET", "HTTP-POST", "API-FLOOD", "RAPID-RESE
 // All available durations; filtered per plan max
 const ALL_DURATIONS = [30, 60, 120, 180, 300, 600, 1200, 3600];
 
+const ALL_L4_METHODS = ["UDP-NORMAL", "UDP-BYPASS", "ICMP"];
+const ALL_L7_METHODS = ["HTTP-GET", "HTTP-POST", "API-FLOOD", "RAPID-RESET"];
+
 export default function Panel() {
-  const { user, profile } = useAuth();
+  const { user, profile, isAdmin } = useAuth();
   const plan = profile?.plan || null;
 
-  // Derive allowed layers / methods from the plan
-  const allowedLayers   = plan?.access_layers  || [];
-  const allowedMethods  = new Set(plan?.methods || []);
-  const maxDuration     = plan?.max_duration    || 0;
-  const maxDailyRuns    = plan?.max_daily_runs  || 0; // 0 = unlimited
+  // Admins bypass all plan restrictions — full access to everything
+  const allowedLayers  = isAdmin ? ["L4", "L7"] : (plan?.access_layers || []);
+  const allowedMethods = isAdmin
+    ? new Set([...ALL_L4_METHODS, ...ALL_L7_METHODS])
+    : new Set(plan?.methods || []);
+  const maxDuration  = isAdmin ? 0 : (plan?.max_duration  || 0); // 0 = unlimited
+  const maxDailyRuns = isAdmin ? 0 : (plan?.max_daily_runs || 0); // 0 = unlimited
 
   const l4Methods = [...allowedMethods].filter(m => L4_METHOD_SET.has(m));
   const l7Methods = [...allowedMethods].filter(m => L7_METHOD_SET.has(m));
@@ -173,8 +178,8 @@ export default function Panel() {
     setTodayCount((c4 || 0) + (c7 || 0));
   }
 
-  const dailyLimitReached = maxDailyRuns > 0 && todayCount >= maxDailyRuns;
-  const noPlan = !plan;
+  const dailyLimitReached = !isAdmin && maxDailyRuns > 0 && todayCount >= maxDailyRuns;
+  const noPlan = !isAdmin && !plan;
   // UDP-NORMAL (method 1) needs a port; UDP-BYPASS (method 2) does not
   const needsPort = layer === "L4" && method === "UDP-NORMAL";
   const l4Blocked = layer === "L4" && l4Busy;
@@ -529,8 +534,8 @@ export default function Panel() {
                 </form>
               )}
 
-              {/* ── Debug panel ───────────────────────────────────────── */}
-              {debugLogs.length > 0 && (
+              {/* ── Debug panel — admin only ──────────────────────────── */}
+              {isAdmin && debugLogs.length > 0 && (
                 <div className="border-t border-white/[0.06]">
                   <button
                     type="button"
