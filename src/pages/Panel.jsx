@@ -40,6 +40,7 @@ export default function Panel() {
   const [launchInfo,  setLaunchInfo]  = useState("");
   const [runs,        setRuns]        = useState([]);
   const [todayCount,  setTodayCount]  = useState(0);
+  const [l4Busy,      setL4Busy]      = useState(false);
 
   const currentMethods = layer === "L4" ? l4Methods : l7Methods;
   const durations = ALL_DURATIONS.filter(d => maxDuration === 0 || d <= maxDuration);
@@ -67,10 +68,19 @@ export default function Panel() {
     setLaunchInfo("");
   };
 
+  async function checkL4Busy() {
+    const { data } = await supabase.rpc("is_l4_busy");
+    setL4Busy(!!data);
+  }
+
   useEffect(() => {
     if (!user) return;
     fetchRuns();
     fetchTodayCount();
+    checkL4Busy();
+    // Poll every 5 s so the busy state stays fresh
+    const timer = setInterval(checkL4Busy, 5000);
+    return () => clearInterval(timer);
   }, [user]);
 
   async function fetchRuns() {
@@ -120,6 +130,7 @@ export default function Panel() {
   const noPlan = !plan;
   // UDP-NORMAL (method 1) needs a port; UDP-BYPASS (method 2) does not
   const needsPort = layer === "L4" && method === "UDP-NORMAL";
+  const l4Blocked = layer === "L4" && l4Busy;
 
   async function launch(e) {
     e.preventDefault();
@@ -128,6 +139,14 @@ export default function Panel() {
     if (dailyLimitReached) {
       setLaunchError(`Daily limit reached (${maxDailyRuns} attacks/day). Resets at midnight.`);
       return;
+    }
+    // Re-check busy state right before firing
+    if (layer === "L4") {
+      const { data: busy } = await supabase.rpc("is_l4_busy");
+      if (busy) {
+        setLaunchError("An L4 attack is already in progress. Wait for it to finish.");
+        return;
+      }
     }
     setLaunchError("");
     setLaunchInfo("");
@@ -188,6 +207,7 @@ export default function Panel() {
       setPort("");
       fetchRuns();
       fetchTodayCount();
+      checkL4Busy();
     }
   }
 
@@ -205,6 +225,7 @@ export default function Panel() {
       .update({ status: "success", stopped_at: new Date().toISOString() })
       .eq("id", id);
     fetchRuns();
+    checkL4Busy();
   }
 
   return (
@@ -227,6 +248,15 @@ export default function Panel() {
             <AlertTriangle className="h-4 w-4 shrink-0 text-amber-400" />
             <p className="text-sm text-amber-300">
               No plan assigned. Contact your admin to get a plan assigned to your account.
+            </p>
+          </div>
+        )}
+
+        {l4Busy && (
+          <div className="mb-6 flex items-center gap-3 rounded-xl border border-red-500/20 bg-red-500/5 px-4 py-3">
+            <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-red-400" />
+            <p className="text-sm text-red-300">
+              An L4 attack is currently running. New L4 attacks are locked until it finishes.
             </p>
           </div>
         )}
