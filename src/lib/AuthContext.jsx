@@ -101,6 +101,7 @@ export const AuthProvider = ({ children }) => {
       authError: null,
       authChecked: true,
       login,
+      register,
       logout,
       navigateToLogin,
       checkUserAuth: () => {},
