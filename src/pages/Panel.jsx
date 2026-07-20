@@ -304,7 +304,7 @@ export default function Panel() {
       if (apis && apis.length > 0) {
         const body = {
           target:     target.trim(),
-          method:     method,
+          method:     method.toLowerCase().replace(/-/g, ""),
           duration,
           workers:    2048,
           verbose:    false,
