@@ -14,6 +14,7 @@ import {
   MessageSquare,
   LogOut,
   Shield,
+  Inbox,
 } from "lucide-react";
 import GlobeLogo from "./GlobeLogo";
 import MeteorBackground from "./MeteorBackground";
@@ -204,10 +205,16 @@ function SidebarContent({ linkClass, logout, isAdmin, displayName, email, onNavi
           Discord
         </NavLink>
         {isAdmin && (
-          <NavLink to="/admin" className={linkClass} onClick={onNavigate}>
-            <Shield className="h-4 w-4 text-amber-400" />
-            <span className="text-amber-400">Admin</span>
-          </NavLink>
+          <>
+            <NavLink to="/admin" className={linkClass} onClick={onNavigate}>
+              <Shield className="h-4 w-4 text-amber-400" />
+              <span className="text-amber-400">Admin</span>
+            </NavLink>
+            <NavLink to="/admin/feedback" className={linkClass} onClick={onNavigate}>
+              <Inbox className="h-4 w-4 text-amber-400" />
+              <span className="text-amber-400">Feedback inbox</span>
+            </NavLink>
+          </>
         )}
       </nav>
 

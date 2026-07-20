@@ -15,6 +15,7 @@ import Profile from '@/pages/Profile';
 import Feedback from '@/pages/Feedback';
 import Discord from '@/pages/Discord';
 import Admin from '@/pages/Admin';
+import AdminFeedback from '@/pages/AdminFeedback';
 import Login from '@/pages/Login';
 import Register from '@/pages/Register';
 import ForgotPassword from '@/pages/ForgotPassword';
@@ -60,6 +61,14 @@ const AuthenticatedApp = () => {
           element={
             <AdminRoute>
               <Admin />
+            </AdminRoute>
+          }
+        />
+        <Route
+          path="/admin/feedback"
+          element={
+            <AdminRoute>
+              <AdminFeedback />
             </AdminRoute>
           }
         />
