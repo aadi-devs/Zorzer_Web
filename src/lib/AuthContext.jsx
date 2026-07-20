@@ -54,10 +54,19 @@ export const AuthProvider = ({ children }) => {
   };
 
   const register = async (email, password, fullName = "") => {
-    const { data, error } = await supabase.auth.signUp({ email, password });
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: { full_name: fullName || null },
+      },
+    });
     if (error) throw new Error(error.message);
 
-    // Insert profile row with no plan assigned (plan_id stays null)
+    // The DB trigger (handle_new_user) creates the profile row automatically.
+    // We follow up with an update to save full_name and ensure plan_id is null.
+    // Using upsert (no ignoreDuplicates) handles the rare case where the trigger
+    // hasn't fired yet.
     if (data.user) {
       await supabase.from("profiles").upsert(
         {
@@ -67,7 +76,7 @@ export const AuthProvider = ({ children }) => {
           plan_id:   null,
           is_admin:  false,
         },
-        { onConflict: "id", ignoreDuplicates: true }
+        { onConflict: "id" }
       );
     }
 

@@ -115,7 +115,6 @@ function UsersTab() {
           <p className="mt-0.5 text-xs text-muted-foreground">Manually provision login credentials for a new user.</p>
         </div>
         <form onSubmit={createUser} className="grid grid-cols-1 gap-4 p-5 sm:grid-cols-2">
-          <Flash msg={flash.msg} type={flash.type} />
           <div className="sm:col-span-2">
             <Flash msg={flash.msg} type={flash.type} />
           </div>
