@@ -6,7 +6,7 @@ import { useAuth } from "@/lib/AuthContext";
 
 // Which methods belong to each layer
 const L4_METHOD_SET = new Set(["UDP-NORMAL", "UDP-BYPASS", "ICMP"]);
-const L7_METHOD_SET = new Set(["httpget", "httpflood", "apiflood", "rapidreset"]);
+const L7_METHOD_SET = new Set(["HTTP-GET", "HTTP-POST", "API-FLOOD", "RAPID-RESET"]);
 
 // All available durations; filtered per plan max
 const ALL_DURATIONS = [30, 60, 120, 180, 300, 600, 1200, 3600];

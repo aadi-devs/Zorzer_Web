@@ -142,7 +142,7 @@ function UsersTab() {
             <select value={form.plan_id} onChange={e => set("plan_id", e.target.value)} className={inputCls}>
               <option value="">— No plan —</option>
               {plans.map(p => (
-                <option key={p.id} value={p.id}>{p.name} (${p.price}/mo)</option>
+                <option key={p.id} value={p.id}>{p.name} (₹{p.price}/mo)</option>
               ))}
             </select>
           </Field>
@@ -391,7 +391,7 @@ function PlansTab() {
               <Field label="Name">
                 <input value={plan.name} onChange={e => updatePlan(plan.id, "name", e.target.value)} className={inputCls} />
               </Field>
-              <Field label="Price ($/mo)">
+              <Field label="Price (₹/mo)">
                 <input type="number" value={plan.price} onChange={e => updatePlan(plan.id, "price", e.target.value)} className={inputCls} />
               </Field>
               <Field label="Concurrent slots">
