@@ -1,68 +1,87 @@
-// paste your Pricing.jsx content here
 import { useState } from "react";
-import { Check, Zap, Rocket, Crown, ArrowRight } from "lucide-react";
+import { Check, Zap, Rocket, Crown, Shield, ArrowRight } from "lucide-react";
 import SiteFooter from "@/components/return/SiteFooter";
 
 const PLANS = [
-{
-  name: "Basic",
-  icon: Zap,
-  price: "₹500",
-  period: "/mo",
-  tagline: "L4 Starter",
-  highlight: false,
-  features: [
-  "Layer 4 access",
-  "Method A only",
-  "1 concurrent run",
-  "600s max duration",
-  "Community support"]
-
-},
-{
-  name: "Elite",
-  icon: Rocket,
-  price: "₹800",
-  period: "/mo",
-  tagline: "L4 All methods",
-  highlight: true,
-  features: [
-  "Layer 4 access",
-  "Method A, B & C",
-  "1 concurrent run",
-  "600s max duration",
-  "Priority routing",
-  "Discord support"]
-
-},
-{
-  name: "God",
-  icon: Crown,
-  price: "₹600",
-  period: "/mo",
-  tagline: "L7\xA0 + L4 access",
-  highlight: false,
-  features: [
-  "Layer 7 access",
-  "Method A, B, C & D",
-  "1 concurrent run",
-  "600s max duration",
-  "Priority routing",
-  "Discord support"]
-
-}];
-
+  {
+    name: "Basic",
+    icon: Zap,
+    price: "₹600",
+    period: "/mo",
+    tagline: "L4 Starter",
+    highlight: false,
+    features: [
+      "Layer 4 access",
+      "UDP-NORMAL method",
+      "120s max duration",
+      "10 runs / day",
+      "Community support",
+    ],
+  },
+  {
+    name: "Elite",
+    icon: Rocket,
+    price: "₹800",
+    period: "/mo",
+    tagline: "L4 All Methods",
+    highlight: true,
+    features: [
+      "Layer 4 access",
+      "UDP-NORMAL, UDP-BYPASS, ICMP",
+      "600s max duration",
+      "20 runs / day",
+      "Priority routing",
+      "Discord support",
+    ],
+  },
+  {
+    name: "Adv",
+    icon: Shield,
+    price: "₹800",
+    period: "/mo",
+    tagline: "L7 Specialist",
+    highlight: false,
+    features: [
+      "Layer 7 access",
+      "HTTP-GET, HTTP-POST, API-FLOOD, RAPID-RESET",
+      "600s max duration",
+      "15 runs / day",
+      "Priority routing",
+      "Discord support",
+    ],
+  },
+  {
+    name: "God",
+    icon: Crown,
+    price: "₹1400",
+    period: "/mo",
+    tagline: "L4 + L7 Full Access",
+    highlight: false,
+    features: [
+      "Layer 4 + Layer 7 access",
+      "All 7 methods unlocked",
+      "1200s max duration",
+      "60 runs / day (30 L4 + 30 L7)",
+      "Priority routing",
+      "Discord support",
+    ],
+  },
+];
 
 const COMPARISON = [
-{ label: "Layer 4 access", values: [true, true, false] },
-{ label: "Layer 7 access", values: [false, false, true] },
-{ label: "Method A", values: [true, true, true] },
-{ label: "Method B", values: [false, true, true] },
-{ label: "Method C", values: [false, true, true] },
-{ label: "Method D", values: [false, false, true] },
-{ label: "Max duration", values: ["600s", "600s", "600s"] },
-{ label: "Concurrent runs", values: ["1", "1", "1"] },
-{ label: "Priority support", values: [false, true, true] }];
+  { label: "Layer 4 access",    values: [true,  true,  false, true]  },
+  { label: "Layer 7 access",    values: [false, false, true,  true]  },
+  { label: "UDP-NORMAL",        values: [true,  true,  false, true]  },
+  { label: "UDP-BYPASS",        values: [false, true,  false, true]  },
+  { label: "ICMP",              values: [false, true,  false, true]  },
+  { label: "HTTP-GET",          values: [false, false, true,  true]  },
+  { label: "HTTP-POST",         values: [false, false, true,  true]  },
+  { label: "API-FLOOD",         values: [false, false, true,  true]  },
+  { label: "RAPID-RESET",       values: [false, false, true,  true]  },
+  { label: "Max duration",      values: ["120s","600s","600s","1200s"]},
+  { label: "Daily run limit",   values: ["10",  "20",  "15",  "60"]  },
+  { label: "Discord support",   values: [false, true,  true,  true]  },
+];
 
 
 export default function Pricing() {
@@ -98,7 +117,7 @@ export default function Pricing() {
         </header>
 
         {/* Plan cards */}
-        <section className="mx-auto mt-12 grid max-w-5xl grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
+        <section className="mx-auto mt-12 grid max-w-6xl grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
           {PLANS.map((p) =>
           <div
             key={p.name}
