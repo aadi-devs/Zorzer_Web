@@ -441,19 +441,17 @@ export default function Panel() {
                     />
                   </Field>
 
-                  {/* Domain — L4 only, stored for record-keeping */}
+                  {/* Domain — L4 only, mandatory, stored for record-keeping */}
                   {layer === "L4" && (
-                    <Field label="Domain (optional)">
+                    <Field label="Domain">
                       <input
+                        required
                         type="text"
                         value={domain}
                         onChange={(e) => setDomain(e.target.value)}
                         placeholder="example.com"
                         className="w-full rounded-lg border border-white/[0.08] bg-black/40 px-3 py-2.5 font-mono text-sm outline-none ring-1 ring-transparent transition focus:border-white/20 focus:ring-white/10"
                       />
-                      <p className="mt-1 text-[10px] text-muted-foreground">
-                        Stored for logging only — not used in the attack.
-                      </p>
                     </Field>
                   )}
 
