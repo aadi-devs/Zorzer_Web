@@ -4,7 +4,8 @@ import SiteFooter from "@/components/return/SiteFooter";
 import { supabase } from "@/lib/supabaseClient";
 import { useAuth } from "@/lib/AuthContext";
 
-const FILTERS = ["All", "Success", "Running", "Failed", "Queued"];
+const STATUS_FILTERS = ["All", "Success", "Running", "Failed", "Queued"];
+const LAYER_FILTERS  = ["All Layers", "L4 Only", "L7 Only"];
 
 const STATUS_MAP = {
   success: { icon: CheckCircle2, label: "success", cls: "bg-zinc-100/10 text-zinc-200 ring-white/10" },
@@ -13,37 +14,59 @@ const STATUS_MAP = {
   queued:  { icon: Clock3,       label: "queued",  cls: "bg-white/[0.04] text-muted-foreground ring-white/[0.06]" },
 };
 
+const LAYER_CLS = {
+  L4: "border-blue-500/20 text-blue-300",
+  L7: "border-purple-500/20 text-purple-300",
+};
+
 function formatTime(iso) {
   if (!iso) return "—";
-  const d = new Date(iso);
-  return d.toISOString().slice(0, 16).replace("T", " ");
+  return new Date(iso).toISOString().slice(0, 16).replace("T", " ");
 }
 
 export default function Activity() {
   const { user } = useAuth();
-  const [filter, setFilter] = useState("All");
-  const [runs, setRuns] = useState([]);
+  const [statusFilter, setStatusFilter] = useState("All");
+  const [layerFilter,  setLayerFilter]  = useState("All Layers");
+  const [runs,    setRuns]    = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!user) return;
     async function fetchRuns() {
       setLoading(true);
-      const { data, error } = await supabase
-        .from("runs")
-        .select("*")
-        .eq("user_id", user.id)
-        .order("created_at", { ascending: false })
-        .limit(50);
-      if (!error && data) setRuns(data);
+      const [{ data: l4Data }, { data: l7Data }] = await Promise.all([
+        supabase
+          .from("l4_runs")
+          .select("*")
+          .eq("user_id", user.id)
+          .order("created_at", { ascending: false })
+          .limit(100),
+        supabase
+          .from("l7_runs")
+          .select("*")
+          .eq("user_id", user.id)
+          .order("created_at", { ascending: false })
+          .limit(100),
+      ]);
+      const combined = [
+        ...(l4Data || []).map(r => ({ ...r, layer: "L4" })),
+        ...(l7Data || []).map(r => ({ ...r, layer: "L7" })),
+      ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+      setRuns(combined);
       setLoading(false);
     }
     fetchRuns();
   }, [user]);
 
   const filtered = runs.filter((r) => {
-    if (filter === "All") return true;
-    return r.status === filter.toLowerCase();
+    const layerOk =
+      layerFilter === "All Layers" ||
+      (layerFilter === "L4 Only" && r.layer === "L4") ||
+      (layerFilter === "L7 Only" && r.layer === "L7");
+    const statusOk =
+      statusFilter === "All" || r.status === statusFilter.toLowerCase();
+    return layerOk && statusOk;
   });
 
   return (
@@ -54,22 +77,21 @@ export default function Activity() {
             <History className="h-3.5 w-3.5" /> Activity
           </div>
           <h1 className="mt-2 font-heading text-3xl font-semibold tracking-tight sm:text-4xl">
-            Activity history
+            Attack history
           </h1>
           <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
-            A log of recent actions, timestamps, and status updates on your account.
+            Full log of all Layer 4 and Layer 7 runs. Each layer is tracked separately.
           </p>
         </header>
 
-        {/* Filters */}
-        <div className="mb-5 flex flex-wrap items-center gap-2">
-          <Filter className="h-4 w-4 text-muted-foreground" />
-          {FILTERS.map((f) => (
+        {/* Layer filter */}
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          {LAYER_FILTERS.map((f) => (
             <button
               key={f}
-              onClick={() => setFilter(f)}
+              onClick={() => setLayerFilter(f)}
               className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
-                filter === f
+                layerFilter === f
                   ? "bg-white text-black"
                   : "border border-white/[0.08] text-muted-foreground hover:text-foreground"
               }`}
@@ -77,6 +99,27 @@ export default function Activity() {
               {f}
             </button>
           ))}
+        </div>
+
+        {/* Status filter */}
+        <div className="mb-5 flex flex-wrap items-center gap-2">
+          <Filter className="h-4 w-4 text-muted-foreground" />
+          {STATUS_FILTERS.map((f) => (
+            <button
+              key={f}
+              onClick={() => setStatusFilter(f)}
+              className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+                statusFilter === f
+                  ? "bg-white text-black"
+                  : "border border-white/[0.08] text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {f}
+            </button>
+          ))}
+          <span className="ml-auto font-mono text-[10px] text-muted-foreground">
+            {filtered.length} record{filtered.length !== 1 ? "s" : ""}
+          </span>
         </div>
 
         <div className="overflow-hidden rounded-2xl border border-white/[0.08] bg-zinc-900/70 backdrop-blur-sm">
@@ -89,44 +132,68 @@ export default function Activity() {
               <History className="mb-3 h-8 w-8 text-muted-foreground/40" />
               <p className="text-sm font-medium">No activity yet</p>
               <p className="mt-1 text-xs text-muted-foreground">
-                Your runs will appear here after you launch one from the Panel.
+                Runs will appear here after you launch one from the Panel.
               </p>
             </div>
           ) : (
-            <ul className="divide-y divide-white/[0.05]">
-              {filtered.map((r) => {
-                const S = STATUS_MAP[r.status] || STATUS_MAP.queued;
-                const Icon = S.icon;
-                return (
-                  <li
-                    key={r.id}
-                    className="flex items-center gap-4 px-5 py-4 transition-colors hover:bg-white/[0.02]"
-                  >
-                    <span className="hidden w-36 shrink-0 font-mono text-xs text-muted-foreground sm:block">
-                      {formatTime(r.created_at)}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium">
-                        {r.layer !== "—" ? `Run started` : "Account action"}
-                      </p>
-                      <p className="mt-0.5 font-mono text-xs text-muted-foreground">
-                        {[r.layer, r.target, r.method]
-                          .filter((x) => x && x !== "—")
-                          .join(" · ")}
-                      </p>
-                    </div>
-                    <span
-                      className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-medium ring-1 ${S.cls}`}
+            <>
+              {/* Table header */}
+              <div className="hidden grid-cols-[8rem_3.5rem_minmax(0,1fr)_7rem_4rem_6rem] gap-4 border-b border-white/[0.06] px-5 py-2.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground sm:grid">
+                <span>Time</span>
+                <span>Layer</span>
+                <span>Target</span>
+                <span>Method</span>
+                <span className="text-right">Dur.</span>
+                <span className="text-right">Status</span>
+              </div>
+              <ul className="divide-y divide-white/[0.05]">
+                {filtered.map((r) => {
+                  const S = STATUS_MAP[r.status] || STATUS_MAP.queued;
+                  const Icon = S.icon;
+                  return (
+                    <li
+                      key={`${r.layer}-${r.id}`}
+                      className="grid grid-cols-1 gap-1 px-5 py-3.5 transition-colors hover:bg-white/[0.02] sm:grid-cols-[8rem_3.5rem_minmax(0,1fr)_7rem_4rem_6rem] sm:items-center sm:gap-4"
                     >
-                      <Icon className={`h-3 w-3 ${S.spin ? "animate-spin" : ""}`} />
-                      {S.label}
-                    </span>
-                  </li>
-                );
-              })}
-            </ul>
+                      <span className="font-mono text-[10px] text-muted-foreground">
+                        {formatTime(r.created_at)}
+                      </span>
+                      <span className={`w-fit rounded-md border px-1.5 py-0.5 font-mono text-[10px] font-semibold ${LAYER_CLS[r.layer]}`}>
+                        {r.layer}
+                      </span>
+                      <span className="truncate font-mono text-xs font-medium">{r.target}</span>
+                      <span className="font-mono text-xs text-zinc-400">{r.method}</span>
+                      <span className="text-right font-mono text-xs text-muted-foreground sm:pr-1">
+                        {r.duration}s
+                      </span>
+                      <span className={`inline-flex w-fit items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-medium ring-1 sm:ml-auto ${S.cls}`}>
+                        <Icon className={`h-3 w-3 ${S.spin ? "animate-spin" : ""}`} />
+                        {S.label}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            </>
           )}
         </div>
+
+        {/* L4 / L7 summary cards */}
+        {!loading && (
+          <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
+            {[
+              { label: "L4 Total",   value: runs.filter(r => r.layer === "L4").length,                              cls: "text-blue-300" },
+              { label: "L7 Total",   value: runs.filter(r => r.layer === "L7").length,                              cls: "text-purple-300" },
+              { label: "Successful", value: runs.filter(r => r.status === "success").length,                        cls: "text-zinc-200" },
+              { label: "Failed",     value: runs.filter(r => r.status === "failed").length,                         cls: "text-red-300" },
+            ].map(({ label, value, cls }) => (
+              <div key={label} className="rounded-xl border border-white/[0.08] bg-zinc-900/60 px-4 py-3 backdrop-blur-sm">
+                <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p>
+                <p className={`mt-1 font-heading text-2xl font-semibold ${cls}`}>{value}</p>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
       <div className="mt-12">
         <SiteFooter />

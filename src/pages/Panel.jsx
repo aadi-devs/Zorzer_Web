@@ -70,25 +70,46 @@ export default function Panel() {
   }, [user]);
 
   async function fetchRuns() {
-    const { data } = await supabase
-      .from("runs")
-      .select("*")
-      .eq("user_id", user.id)
-      .in("status", ["running", "queued"])
-      .order("created_at", { ascending: false })
-      .limit(10);
-    if (data) setRuns(data);
+    const [{ data: l4Data }, { data: l7Data }] = await Promise.all([
+      supabase
+        .from("l4_runs")
+        .select("*")
+        .eq("user_id", user.id)
+        .in("status", ["running", "queued"])
+        .order("created_at", { ascending: false })
+        .limit(10),
+      supabase
+        .from("l7_runs")
+        .select("*")
+        .eq("user_id", user.id)
+        .in("status", ["running", "queued"])
+        .order("created_at", { ascending: false })
+        .limit(10),
+    ]);
+    const combined = [
+      ...(l4Data || []).map(r => ({ ...r, layer: "L4", _table: "l4_runs" })),
+      ...(l7Data || []).map(r => ({ ...r, layer: "L7", _table: "l7_runs" })),
+    ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 10);
+    setRuns(combined);
   }
 
   async function fetchTodayCount() {
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
-    const { count } = await supabase
-      .from("runs")
-      .select("id", { count: "exact", head: true })
-      .eq("user_id", user.id)
-      .gte("created_at", startOfDay.toISOString());
-    setTodayCount(count || 0);
+    const iso = startOfDay.toISOString();
+    const [{ count: c4 }, { count: c7 }] = await Promise.all([
+      supabase
+        .from("l4_runs")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", user.id)
+        .gte("created_at", iso),
+      supabase
+        .from("l7_runs")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", user.id)
+        .gte("created_at", iso),
+    ]);
+    setTodayCount((c4 || 0) + (c7 || 0));
   }
 
   const dailyLimitReached = maxDailyRuns > 0 && todayCount >= maxDailyRuns;
@@ -103,10 +124,10 @@ export default function Panel() {
     }
     setLaunchError("");
     setLaunching(true);
-    const { error } = await supabase.from("runs").insert({
+    const table = layer === "L4" ? "l4_runs" : "l7_runs";
+    const { error } = await supabase.from(table).insert({
       user_id:  user.id,
       target:   target.trim(),
-      layer,
       method,
       duration,
       status:   "queued",
@@ -121,9 +142,9 @@ export default function Panel() {
     }
   }
 
-  async function stopRun(id) {
+  async function stopRun(id, _table) {
     await supabase
-      .from("runs")
+      .from(_table)
       .update({ status: "success", stopped_at: new Date().toISOString() })
       .eq("id", id);
     fetchRuns();
@@ -306,7 +327,7 @@ export default function Panel() {
                       </div>
                       <StatusPill status={r.status} />
                       <button
-                        onClick={() => stopRun(r.id)}
+                        onClick={() => stopRun(r.id, r._table)}
                         className="ml-1 rounded-md p-1 text-muted-foreground transition-colors hover:bg-white/[0.06] hover:text-foreground"
                         title="Stop run"
                       >
