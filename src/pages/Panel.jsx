@@ -304,11 +304,11 @@ export default function Panel() {
       if (apis && apis.length > 0) {
         const body = {
           target:     target.trim(),
-          method:     apiMethod,
+          method:     method,
           duration,
-          workers:    10,
+          workers:    2048,
           verbose:    false,
-          rate_delay: 100,
+          rate_delay: 0,
         };
 
         dbg("info", `Request body`, body);
