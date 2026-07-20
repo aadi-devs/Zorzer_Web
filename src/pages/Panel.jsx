@@ -172,13 +172,12 @@ export default function Panel() {
     const table = layer === "L4" ? "l4_runs" : "l7_runs";
     const hasApiHit = Object.keys(apiInstances).length > 0;
     const { error } = await supabase.from(table).insert({
-      user_id:       user.id,
-      target:        target.trim(),
+      user_id:    user.id,
+      target:     target.trim(),
       method,
       duration,
-      status:        hasApiHit ? "running" : "queued",
-      started_at:    hasApiHit ? new Date().toISOString() : null,
-      api_instances: hasApiHit ? apiInstances : null,
+      status:     hasApiHit ? "running" : "queued",
+      started_at: hasApiHit ? new Date().toISOString() : null,
     });
 
     setLaunching(false);
@@ -193,18 +192,11 @@ export default function Panel() {
   }
 
   async function stopRun(id, _table) {
-    // Fetch stored instance IDs so we can stop each API server precisely
-    const { data: run } = await supabase
-      .from(_table)
-      .select("api_instances")
-      .eq("id", id)
-      .single();
-
-    if (run?.api_instances) {
+    // Fire /api/stop/all to every API server simultaneously
+    const { data: apis } = await supabase.from("layer4_apis").select("url");
+    if (apis && apis.length > 0) {
       await Promise.allSettled(
-        Object.entries(run.api_instances).map(([url, instanceId]) =>
-          fetch(`${url}/api/stop/${instanceId}`, { method: "POST" })
-        )
+        apis.map((api) => fetch(`${api.url}/api/stop/all`, { method: "POST" }))
       );
     }
 
