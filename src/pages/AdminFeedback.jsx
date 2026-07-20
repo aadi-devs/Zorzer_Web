@@ -46,11 +46,12 @@ export default function AdminFeedback() {
     const reply = (replyText[item.id] ?? item.admin_reply ?? "").trim();
     if (!reply) return;
     setSaving(s => ({ ...s, [item.id]: true }));
+    const now = new Date().toISOString();
     const { error } = await supabase
       .from("feedback")
       .update({
         admin_reply: reply,
-        replied_at:  new Date().toISOString(),
+        replied_at:  now,
         status:      "replied",
       })
       .eq("id", item.id);
@@ -60,13 +61,21 @@ export default function AdminFeedback() {
     } else {
       setSaveMsg(m => ({ ...m, [item.id]: "Reply saved ✓" }));
       setTimeout(() => setSaveMsg(m => ({ ...m, [item.id]: "" })), 3000);
-      fetchFeedback();
+      // Update local state instead of refetching the whole list
+      setItems(prev => prev.map(i =>
+        i.id === item.id
+          ? { ...i, admin_reply: reply, replied_at: now, status: "replied" }
+          : i
+      ));
     }
   }
 
   async function setStatus(id, status) {
-    await supabase.from("feedback").update({ status }).eq("id", id);
-    fetchFeedback();
+    const { error } = await supabase.from("feedback").update({ status }).eq("id", id);
+    if (!error) {
+      // Update local state instead of refetching the whole list
+      setItems(prev => prev.map(i => i.id === id ? { ...i, status } : i));
+    }
   }
 
   const topics  = ["all", ...new Set(items.map(i => i.topic))];

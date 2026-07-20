@@ -4,12 +4,21 @@ import { supabase } from './supabaseClient';
 const AuthContext = createContext();
 
 async function fetchProfile(userId) {
-  const { data } = await supabase
-    .from('profiles')
-    .select('id, email, full_name, is_admin, plan_id, plan:plans(id, name, methods, access_layers, max_duration, max_daily_runs, features, tagline, price, highlight)')
-    .eq('id', userId)
-    .single();
-  return data || null;
+  try {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id, email, full_name, is_admin, plan_id, plan:plans(id, name, methods, access_layers, max_duration, max_daily_runs, features, tagline, price, highlight)')
+      .eq('id', userId)
+      .single();
+    if (error) {
+      console.error('[AuthContext] fetchProfile error:', error.message);
+      return null;
+    }
+    return data || null;
+  } catch (err) {
+    console.error('[AuthContext] fetchProfile exception:', err.message);
+    return null;
+  }
 }
 
 export const AuthProvider = ({ children }) => {
@@ -57,27 +66,21 @@ export const AuthProvider = ({ children }) => {
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
-      options: {
-        data: { full_name: fullName || null },
-      },
+      options: { data: { full_name: fullName || null } },
     });
     if (error) throw new Error(error.message);
 
-    // The DB trigger (handle_new_user) creates the profile row automatically.
-    // We follow up with an update to save full_name and ensure plan_id is null.
-    // Using upsert (no ignoreDuplicates) handles the rare case where the trigger
-    // hasn't fired yet.
+    // The DB trigger (handle_new_user) creates the profile row.
+    // We upsert to set full_name in case the trigger runs before or after us.
     if (data.user) {
-      await supabase.from("profiles").upsert(
-        {
-          id:        data.user.id,
-          email:     data.user.email,
-          full_name: fullName || null,
-          plan_id:   null,
-          is_admin:  false,
-        },
-        { onConflict: "id" }
-      );
+      try {
+        await supabase.from("profiles").upsert(
+          { id: data.user.id, email: data.user.email, full_name: fullName || null, plan_id: null, is_admin: false },
+          { onConflict: "id" }
+        );
+      } catch (upsertErr) {
+        console.warn('[AuthContext] profile upsert warning:', upsertErr.message);
+      }
     }
 
     return data;
@@ -85,10 +88,9 @@ export const AuthProvider = ({ children }) => {
 
   const logout = async () => {
     await supabase.auth.signOut();
+    // Full reload to flush all in-memory state
     window.location.href = '/login';
   };
-
-  const navigateToLogin = () => { window.location.href = '/login'; };
 
   return (
     <AuthContext.Provider value={{
@@ -103,7 +105,7 @@ export const AuthProvider = ({ children }) => {
       login,
       register,
       logout,
-      navigateToLogin,
+      navigateToLogin: () => { window.location.href = '/login'; },
       checkUserAuth: () => {},
       checkAppState: () => {},
     }}>

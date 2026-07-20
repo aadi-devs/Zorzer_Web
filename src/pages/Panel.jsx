@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { Link } from "react-router-dom";
 import { Crosshair, Layers, Play, Square, Lock, AlertTriangle } from "lucide-react";
 import SiteFooter from "@/components/return/SiteFooter";
 import { supabase } from "@/lib/supabaseClient";
@@ -221,8 +222,8 @@ export default function Panel() {
     const authToken = session?.access_token ?? "";
     const proxyHeaders = { "Content-Type": "application/json", Authorization: `Bearer ${authToken}` };
 
-    if (layer === "L4" && (method === "UDP-NORMAL" || method === "UDP-BYPASS")) {
-      dbg("info", "Dispatching L4 attack via proxy…");
+    if (layer === "L4") {
+      dbg("info", `Dispatching L4 attack (${method}) via proxy…`);
       try {
         const r = await fetch("/proxy/l4/start", {
           method:  "POST",
@@ -279,8 +280,6 @@ export default function Panel() {
         setLaunchError(err.message);
       }
 
-    } else {
-      dbg("info", `Method ${method} does not use API nodes — skipping API dispatch`);
     }
 
     // ── Save run record — always "running" so it appears in Active runs ──
@@ -355,7 +354,11 @@ export default function Panel() {
           <div className="mb-6 flex items-center gap-3 rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-3">
             <AlertTriangle className="h-4 w-4 shrink-0 text-amber-400" />
             <p className="text-sm text-amber-300">
-              No plan assigned. Contact your admin to get a plan assigned to your account.
+              No plan assigned.{" "}
+              <Link to="/pricing" className="underline underline-offset-2 hover:text-amber-200 transition-colors">
+                View plans
+              </Link>{" "}
+              or contact your admin on Discord to get access.
             </p>
           </div>
         )}

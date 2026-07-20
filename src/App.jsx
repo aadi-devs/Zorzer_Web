@@ -23,7 +23,11 @@ import ResetPassword from '@/pages/ResetPassword';
 
 const AdminRoute = ({ children }) => {
   const { isLoadingAuth, isAuthenticated, isAdmin } = useAuth();
-  if (isLoadingAuth) return null;
+  if (isLoadingAuth) return (
+    <div className="fixed inset-0 flex items-center justify-center bg-background">
+      <div className="h-8 w-8 animate-spin rounded-full border-4 border-zinc-700 border-t-zinc-300" />
+    </div>
+  );
   if (!isAuthenticated) return <Navigate to="/login" replace />;
   if (!isAdmin) return <Navigate to="/dashboard" replace />;
   return children;

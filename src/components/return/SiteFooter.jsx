@@ -2,14 +2,12 @@ import { Link } from "react-router-dom";
 import GlobeLogo from "./GlobeLogo";
 
 const LINKS = [
-{ label: "Features", to: "/dashboard" },
-{ label: "Platform", to: "/panel" },
-{ label: "Plans", to: "/pricing" },
-{ label: "Resolver", to: "/dashboard" },
-{ label: "API", to: "/dashboard" },
-{ label: "FAQ", to: "/dashboard" },
-{ label: "Terms", to: "/dashboard" }];
-
+  { label: "Dashboard", to: "/dashboard" },
+  { label: "Panel",     to: "/panel" },
+  { label: "Plans",     to: "/pricing" },
+  { label: "Discord",   to: "/discord" },
+  { label: "Feedback",  to: "/feedback" },
+];
 
 export default function SiteFooter() {
   return (
@@ -28,15 +26,15 @@ export default function SiteFooter() {
             </div>
           </div>
           <nav className="flex flex-wrap gap-2" aria-label="Footer">
-            {LINKS.map((l) => null
-
-
-
-
-
-
-
-            )}
+            {LINKS.map((l) => (
+              <Link
+                key={l.to}
+                to={l.to}
+                className="rounded-full border border-white/[0.08] px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-white/20 hover:text-foreground"
+              >
+                {l.label}
+              </Link>
+            ))}
           </nav>
         </div>
         <div className="mt-8 flex flex-col items-center justify-between gap-2 border-t border-white/[0.06] pt-6 text-xs text-muted-foreground sm:flex-row">
@@ -44,6 +42,6 @@ export default function SiteFooter() {
           <p>Built for maximum power · Layer 4 &amp; Layer 7</p>
         </div>
       </div>
-    </footer>);
-
+    </footer>
+  );
 }

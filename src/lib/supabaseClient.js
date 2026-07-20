@@ -2,19 +2,10 @@ import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl     = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-const supabaseServiceKey = import.meta.env.VITE_SUPABASE_SERVICE_KEY;
 
 if (!supabaseUrl || !supabaseAnonKey) {
-  console.error('Missing VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY environment variables.');
+  throw new Error('Missing VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY — check your environment variables.');
 }
 
 // Regular client — uses anon key, respects RLS
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
-
-// Admin client — uses service role key, bypasses RLS
-// Only used inside the /admin page for user management
-export const supabaseAdmin = supabaseServiceKey
-  ? createClient(supabaseUrl, supabaseServiceKey, {
-      auth: { autoRefreshToken: false, persistSession: false },
-    })
-  : null;

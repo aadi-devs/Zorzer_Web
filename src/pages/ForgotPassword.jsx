@@ -5,19 +5,34 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Mail, ArrowLeft, Loader2, CheckCircle2 } from "lucide-react";
 import AuthLayout from "@/components/AuthLayout";
+import { supabase } from "@/lib/supabaseClient";
 
 export default function ForgotPassword() {
-  const [email, setEmail] = useState("");
+  const [email,   setEmail]   = useState("");
   const [loading, setLoading] = useState(false);
-  const [sent, setSent] = useState(false);
+  const [sent,    setSent]    = useState(false);
+  const [error,   setError]   = useState("");
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setError("");
+    if (!email.trim()) return;
     setLoading(true);
-    // Simulate a delay
-    await new Promise((r) => setTimeout(r, 800));
+    const { error: resetErr } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+      redirectTo: `${window.location.origin}/reset-password`,
+    });
     setLoading(false);
+    // Always show "sent" to avoid email enumeration — even if the email doesn't exist
+    if (resetErr) console.warn('[ForgotPassword]', resetErr.message);
     setSent(true);
+  };
+
+  const handleResend = async () => {
+    setLoading(true);
+    await supabase.auth.resetPasswordForEmail(email.trim(), {
+      redirectTo: `${window.location.origin}/reset-password`,
+    });
+    setLoading(false);
   };
 
   return (
@@ -40,6 +55,13 @@ export default function ForgotPassword() {
           <p className="text-sm text-muted-foreground">
             If an account exists for <span className="text-foreground">{email}</span>, you'll receive a reset link shortly.
           </p>
+          <button
+            onClick={handleResend}
+            disabled={loading}
+            className="text-xs text-muted-foreground underline transition-colors hover:text-foreground disabled:opacity-50"
+          >
+            {loading ? "Sending…" : "Resend email"}
+          </button>
           <Link
             to="/login"
             className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-white px-5 py-2 text-xs font-medium text-black ring-1 ring-white/10 hover:bg-zinc-200 transition-colors"
@@ -49,6 +71,9 @@ export default function ForgotPassword() {
         </div>
       ) : (
         <form onSubmit={handleSubmit} className="space-y-4">
+          {error && (
+            <div className="rounded-lg border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive">{error}</div>
+          )}
           <div className="space-y-2">
             <Label htmlFor="email">Email address</Label>
             <div className="relative">
@@ -57,7 +82,6 @@ export default function ForgotPassword() {
                 id="email"
                 type="email"
                 autoComplete="email"
-                autoFocus
                 placeholder="you@example.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -67,14 +91,7 @@ export default function ForgotPassword() {
             </div>
           </div>
           <Button type="submit" className="w-full h-12 font-medium" disabled={loading}>
-            {loading ? (
-              <>
-                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                Sending...
-              </>
-            ) : (
-              "Send reset link"
-            )}
+            {loading ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Sending...</> : "Send reset link"}
           </Button>
         </form>
       )}

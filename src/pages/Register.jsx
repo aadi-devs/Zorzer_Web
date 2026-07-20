@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { UserPlus, Mail, Lock, User, Loader2, CheckCircle } from "lucide-react";
 import AuthLayout from "@/components/AuthLayout";
+import { supabase } from "@/lib/supabaseClient";
 
 export default function Register() {
   const { register } = useAuth();
@@ -69,6 +70,7 @@ export default function Register() {
           Click the link in the email to activate your account, then come back and log in.
           Your account has no plan assigned — an admin will upgrade you once verified.
         </p>
+        <ResendButton email={email} />
       </AuthLayout>
     );
   }

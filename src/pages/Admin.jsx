@@ -1,11 +1,12 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   Shield, Users, Newspaper, CreditCard,
-  Plus, Trash2, Save, Check, Loader2,
-  Eye, EyeOff, UserPlus, RefreshCw,
+  Plus, Trash2, Save, Loader2,
+  Eye, EyeOff, UserPlus, RefreshCw, AlertTriangle, X,
 } from "lucide-react";
 import SiteFooter from "@/components/return/SiteFooter";
-import { supabase, supabaseAdmin } from "@/lib/supabaseClient";
+import { supabase } from "@/lib/supabaseClient";
+import { useAuth } from "@/lib/AuthContext";
 
 const TABS = [
   { id: "users",  label: "Users",  icon: Users },
@@ -21,9 +22,7 @@ function Flash({ msg, type = "success" }) {
   const cls = type === "error"
     ? "bg-red-500/10 border-red-500/20 text-red-300"
     : "bg-white/[0.06] border-white/10 text-zinc-200";
-  return (
-    <div className={`mb-4 rounded-lg border px-4 py-2.5 text-xs ${cls}`}>{msg}</div>
-  );
+  return <div className={`mb-4 rounded-lg border px-4 py-2.5 text-xs ${cls}`}>{msg}</div>;
 }
 
 function Field({ label, children }) {
@@ -39,75 +38,134 @@ function Field({ label, children }) {
 
 const inputCls = "w-full rounded-lg border border-white/[0.08] bg-black/40 px-3 py-2.5 text-sm outline-none transition focus:border-white/20 focus:ring-1 focus:ring-white/10 placeholder:text-muted-foreground";
 
+// ── Proxy helper ─────────────────────────────────────────────────────────────
+async function adminFetch(path, options = {}) {
+  const { data: { session } } = await supabase.auth.getSession();
+  const token = session?.access_token ?? "";
+  const res = await fetch(path, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+      ...(options.headers || {}),
+    },
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
+  return json;
+}
+
+// ── Confirm modal ─────────────────────────────────────────────────────────────
+function ConfirmModal({ message, onConfirm, onCancel }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onCancel}>
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
+      <div
+        className="relative z-10 w-full max-w-sm overflow-hidden rounded-2xl border border-white/[0.1] bg-zinc-900 p-6 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <button onClick={onCancel} className="absolute right-4 top-4 rounded-lg p-1.5 text-muted-foreground hover:bg-white/[0.06]">
+          <X className="h-4 w-4" />
+        </button>
+        <div className="mb-5 flex items-center gap-3">
+          <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-red-500/10 ring-1 ring-red-500/20">
+            <AlertTriangle className="h-4 w-4 text-red-400" />
+          </span>
+          <p className="text-sm font-medium">Are you sure?</p>
+        </div>
+        <p className="mb-5 text-sm text-muted-foreground">{message}</p>
+        <div className="flex gap-3">
+          <button
+            onClick={onConfirm}
+            className="flex-1 rounded-full bg-red-600 py-2 text-sm font-medium text-white transition-colors hover:bg-red-500"
+          >
+            Delete
+          </button>
+          <button
+            onClick={onCancel}
+            className="flex-1 rounded-full border border-white/[0.1] py-2 text-sm font-medium text-muted-foreground hover:text-foreground"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Users tab ──────────────────────────────────────────────────────────────
 function UsersTab() {
-  const [form, setForm]       = useState({ email: "", password: "", full_name: "", plan_id: "" });
-  const [showPw, setShowPw]   = useState(false);
-  const [plans, setPlans]     = useState([]);
-  const [users, setUsers]     = useState([]);
-  const [saving, setSaving]   = useState(false);
-  const [flash, setFlash]     = useState({ msg: "", type: "success" });
+  const [form, setForm]         = useState({ email: "", password: "", full_name: "", plan_id: "" });
+  const [showPw, setShowPw]     = useState(false);
+  const [plans, setPlans]       = useState([]);
+  const [users, setUsers]       = useState([]);
+  const [saving, setSaving]     = useState(false);
+  const [flash, setFlash]       = useState({ msg: "", type: "success" });
+  const [confirm, setConfirm]   = useState(null); // { id, email }
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const loadUsers = useCallback(async () => {
+    try {
+      const json = await adminFetch("/proxy/admin/users");
+      setUsers(json.users || []);
+    } catch (err) {
+      console.error("loadUsers:", err.message);
+    }
+  }, []);
 
   useEffect(() => {
     supabase.from("plans").select("id,name,price").order("price").then(({ data }) => {
       if (data) { setPlans(data); set("plan_id", data[0]?.id || ""); }
     });
     loadUsers();
-  }, []);
-
-  async function loadUsers() {
-    if (!supabaseAdmin) return;
-    const { data, error } = await supabaseAdmin.auth.admin.listUsers();
-    if (!error && data) setUsers(data.users || []);
-  }
+  }, [loadUsers]);
 
   async function createUser(e) {
     e.preventDefault();
-    if (!supabaseAdmin) {
-      setFlash({ msg: "Admin client unavailable — check VITE_SUPABASE_SERVICE_KEY.", type: "error" });
-      return;
-    }
     setSaving(true);
     setFlash({ msg: "", type: "success" });
-
-    const { data, error } = await supabaseAdmin.auth.admin.createUser({
-      email:    form.email,
-      password: form.password,
-      email_confirm: true,
-      user_metadata: { full_name: form.full_name },
-    });
-
-    if (error) {
-      setFlash({ msg: error.message, type: "error" });
+    try {
+      await adminFetch("/proxy/admin/users", {
+        method: "POST",
+        body: JSON.stringify({
+          email:     form.email,
+          password:  form.password,
+          full_name: form.full_name,
+          plan_id:   form.plan_id || null,
+        }),
+      });
+      setFlash({ msg: `Account created for ${form.email}`, type: "success" });
+      setForm({ email: "", password: "", full_name: "", plan_id: plans[0]?.id || "" });
+      loadUsers();
+    } catch (err) {
+      setFlash({ msg: err.message, type: "error" });
+    } finally {
       setSaving(false);
-      return;
     }
-
-    // Update profile row (trigger creates it automatically)
-    if (form.full_name || form.plan_id) {
-      await supabaseAdmin.from("profiles").update({
-        full_name: form.full_name || null,
-        plan_id:   form.plan_id   || null,
-      }).eq("id", data.user.id);
-    }
-
-    setFlash({ msg: `Account created for ${form.email}`, type: "success" });
-    setForm({ email: "", password: "", full_name: "", plan_id: plans[0]?.id || "" });
-    setSaving(false);
-    loadUsers();
   }
 
   async function deleteUser(id) {
-    if (!supabaseAdmin) return;
-    if (!confirm("Delete this user permanently?")) return;
-    await supabaseAdmin.auth.admin.deleteUser(id);
-    loadUsers();
+    try {
+      await adminFetch(`/proxy/admin/users/${id}`, { method: "DELETE" });
+      setUsers(u => u.filter(x => x.id !== id));
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setConfirm(null);
+    }
   }
 
   return (
     <div className="space-y-6">
+      {confirm && (
+        <ConfirmModal
+          message={`Delete ${confirm.email} permanently? This cannot be undone.`}
+          onConfirm={() => deleteUser(confirm.id)}
+          onCancel={() => setConfirm(null)}
+        />
+      )}
+
       {/* Create form */}
       <div className="rounded-2xl border border-white/[0.08] bg-zinc-900/70 backdrop-blur-sm">
         <div className="border-b border-white/[0.06] px-5 py-4">
@@ -129,8 +187,8 @@ function UsersTab() {
           <Field label="Password">
             <div className="relative">
               <input required type={showPw ? "text" : "password"} value={form.password}
-                onChange={e => set("password", e.target.value)} placeholder="min. 6 characters"
-                minLength={6} className={inputCls + " pr-10"} />
+                onChange={e => set("password", e.target.value)} placeholder="min. 8 characters"
+                minLength={8} className={inputCls + " pr-10"} />
               <button type="button" onClick={() => setShowPw(v => !v)}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
                 {showPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -183,8 +241,10 @@ function UsersTab() {
                 }`}>
                   {u.email_confirmed_at ? "active" : "unconfirmed"}
                 </span>
-                <button onClick={() => deleteUser(u.id)}
-                  className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-red-500/10 hover:text-red-400">
+                <button
+                  onClick={() => setConfirm({ id: u.id, email: u.email })}
+                  className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-red-500/10 hover:text-red-400"
+                >
                   <Trash2 className="h-3.5 w-3.5" />
                 </button>
               </li>
@@ -198,10 +258,11 @@ function UsersTab() {
 
 // ─── News tab ───────────────────────────────────────────────────────────────
 function NewsTab() {
-  const [form, setForm]   = useState({ title: "", body: "", tag: "Update" });
-  const [news, setNews]   = useState([]);
+  const [form, setForm]     = useState({ title: "", body: "", tag: "Update" });
+  const [news, setNews]     = useState([]);
   const [saving, setSaving] = useState(false);
-  const [flash, setFlash] = useState({ msg: "", type: "success" });
+  const [flash, setFlash]   = useState({ msg: "", type: "success" });
+  const [confirm, setConfirm] = useState(null); // news id
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
@@ -216,9 +277,7 @@ function NewsTab() {
     e.preventDefault();
     setSaving(true);
     setFlash({ msg: "", type: "success" });
-    const { error } = await supabase.from("news").insert({
-      title: form.title, body: form.body, tag: form.tag,
-    });
+    const { error } = await supabase.from("news").insert({ title: form.title, body: form.body, tag: form.tag });
     setSaving(false);
     if (error) {
       setFlash({ msg: error.message, type: "error" });
@@ -230,9 +289,9 @@ function NewsTab() {
   }
 
   async function deleteNews(id) {
-    if (!confirm("Delete this announcement?")) return;
     await supabase.from("news").delete().eq("id", id);
-    loadNews();
+    setNews(n => n.filter(x => x.id !== id));
+    setConfirm(null);
   }
 
   const TAG_CLS = {
@@ -244,7 +303,14 @@ function NewsTab() {
 
   return (
     <div className="space-y-6">
-      {/* Post form */}
+      {confirm && (
+        <ConfirmModal
+          message="Delete this announcement permanently?"
+          onConfirm={() => deleteNews(confirm)}
+          onCancel={() => setConfirm(null)}
+        />
+      )}
+
       <div className="rounded-2xl border border-white/[0.08] bg-zinc-900/70 backdrop-blur-sm">
         <div className="border-b border-white/[0.06] px-5 py-4">
           <h2 className="text-sm font-semibold">Post announcement</h2>
@@ -277,7 +343,6 @@ function NewsTab() {
         </form>
       </div>
 
-      {/* Existing news */}
       <div className="rounded-2xl border border-white/[0.08] bg-zinc-900/70 backdrop-blur-sm">
         <div className="border-b border-white/[0.06] px-5 py-4">
           <h2 className="text-sm font-semibold">Posted announcements</h2>
@@ -298,7 +363,7 @@ function NewsTab() {
                     {new Date(n.created_at).toLocaleString()}
                   </p>
                 </div>
-                <button onClick={() => deleteNews(n.id)}
+                <button onClick={() => setConfirm(n.id)}
                   className="mt-0.5 shrink-0 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-red-500/10 hover:text-red-400">
                   <Trash2 className="h-3.5 w-3.5" />
                 </button>
@@ -314,8 +379,8 @@ function NewsTab() {
 // ─── Plans tab ──────────────────────────────────────────────────────────────
 function PlansTab() {
   const [plans, setPlans]   = useState([]);
-  const [saving, setSaving] = useState(null); // plan id
-  const [flash, setFlash]   = useState({});   // { [id]: { msg, type } }
+  const [saving, setSaving] = useState(null);
+  const [flash, setFlash]   = useState({});
 
   useEffect(() => { loadPlans(); }, []);
 
@@ -324,13 +389,13 @@ function PlansTab() {
     if (data) setPlans(data);
   }
 
-  const updatePlan = (id, key, val) => {
+  const updatePlan = (id, key, val) =>
     setPlans(ps => ps.map(p => p.id === id ? { ...p, [key]: val } : p));
-  };
 
+  // Keep raw string in a separate display state to avoid comma corruption while typing
   const updateArray = (id, key, raw) => {
-    const arr = raw.split(",").map(s => s.trim()).filter(Boolean);
-    setPlans(ps => ps.map(p => p.id === id ? { ...p, [key]: arr } : p));
+    // Store the raw string for display; parse on save
+    setPlans(ps => ps.map(p => p.id === id ? { ...p, [`${key}_raw`]: raw, [key]: raw.split(",").map(s => s.trim()).filter(Boolean) } : p));
   };
 
   async function savePlan(plan) {
@@ -352,8 +417,8 @@ function PlansTab() {
     setFlash(f => ({
       ...f,
       [plan.id]: error
-        ? { msg: error.message,   type: "error" }
-        : { msg: "Saved.",        type: "success" },
+        ? { msg: error.message, type: "error" }
+        : { msg: "Saved.",      type: "success" },
     }));
   }
 
@@ -383,9 +448,7 @@ function PlansTab() {
             </label>
           </div>
           <div className="space-y-3 p-5">
-            {flash[plan.id]?.msg && (
-              <Flash msg={flash[plan.id].msg} type={flash[plan.id].type} />
-            )}
+            {flash[plan.id]?.msg && <Flash msg={flash[plan.id].msg} type={flash[plan.id].type} />}
             <div className="grid grid-cols-2 gap-3">
               <Field label="Name">
                 <input value={plan.name} onChange={e => updatePlan(plan.id, "name", e.target.value)} className={inputCls} />
@@ -404,13 +467,27 @@ function PlansTab() {
               <input value={plan.tagline || ""} onChange={e => updatePlan(plan.id, "tagline", e.target.value)} className={inputCls} />
             </Field>
             <Field label="Access layers (comma-separated)">
-              <input value={(plan.access_layers || []).join(", ")} onChange={e => updateArray(plan.id, "access_layers", e.target.value)} placeholder="L4, L7" className={inputCls} />
+              <input
+                value={plan.access_layers_raw ?? (plan.access_layers || []).join(", ")}
+                onChange={e => updateArray(plan.id, "access_layers", e.target.value)}
+                placeholder="L4, L7"
+                className={inputCls}
+              />
             </Field>
             <Field label="Methods (comma-separated)">
-              <input value={(plan.methods || []).join(", ")} onChange={e => updateArray(plan.id, "methods", e.target.value)} placeholder="Method A, Method B" className={inputCls} />
+              <input
+                value={plan.methods_raw ?? (plan.methods || []).join(", ")}
+                onChange={e => updateArray(plan.id, "methods", e.target.value)}
+                placeholder="UDP-NORMAL, HTTP-GET"
+                className={inputCls}
+              />
             </Field>
             <Field label="Features (comma-separated)">
-              <input value={(plan.features || []).join(", ")} onChange={e => updateArray(plan.id, "features", e.target.value)} className={inputCls} />
+              <input
+                value={plan.features_raw ?? (plan.features || []).join(", ")}
+                onChange={e => updateArray(plan.id, "features", e.target.value)}
+                className={inputCls}
+              />
             </Field>
             <button
               onClick={() => savePlan(plan)}
@@ -432,7 +509,6 @@ function PlansTab() {
 // ─── Main Admin page ─────────────────────────────────────────────────────────
 export default function Admin() {
   const [tab, setTab] = useState("users");
-  const Active = TABS.find(t => t.id === tab);
 
   return (
     <div className="relative z-10">
@@ -449,16 +525,13 @@ export default function Admin() {
           </p>
         </header>
 
-        {/* Tab bar */}
         <div className="mb-6 flex gap-1 rounded-xl border border-white/[0.08] bg-black/30 p-1 w-fit">
           {TABS.map(t => (
             <button
               key={t.id}
               onClick={() => setTab(t.id)}
               className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
-                tab === t.id
-                  ? "bg-white/[0.08] text-foreground ring-1 ring-white/10"
-                  : "text-muted-foreground hover:text-foreground"
+                tab === t.id ? "bg-white/[0.08] text-foreground ring-1 ring-white/10" : "text-muted-foreground hover:text-foreground"
               }`}
             >
               <t.icon className="h-4 w-4" />
