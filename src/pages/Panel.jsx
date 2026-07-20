@@ -1,9 +1,11 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
+import { motion, AnimatePresence } from "framer-motion";
 import { Crosshair, Layers, Play, Square, Lock, AlertTriangle } from "lucide-react";
 import SiteFooter from "@/components/return/SiteFooter";
 import { supabase } from "@/lib/supabaseClient";
 import { useAuth } from "@/lib/AuthContext";
+import { fadeUp, fadeIn, staggerContainer, scaleIn } from "@/lib/motion";
 
 // Which methods belong to each layer
 const L4_METHOD_SET = new Set(["UDP-NORMAL", "UDP-BYPASS", "ICMP"]);
@@ -371,52 +373,68 @@ export default function Panel() {
   return (
     <div className="relative z-10">
       <div className="mx-auto max-w-7xl">
-        <header className="mb-8">
-          <div className="flex items-center gap-2 text-xs uppercase tracking-wider text-muted-foreground">
+        <motion.header
+          className="mb-8"
+          variants={staggerContainer(0.07)}
+          initial="hidden"
+          animate="visible"
+        >
+          <motion.div variants={fadeIn} className="flex items-center gap-2 text-xs uppercase tracking-wider text-muted-foreground">
             <Crosshair className="h-3.5 w-3.5" /> Panel
-          </div>
-          <h1 className="mt-2 font-heading text-3xl font-semibold tracking-tight sm:text-4xl">
+          </motion.div>
+          <motion.h1 variants={fadeUp} className="mt-2 font-heading text-3xl font-semibold tracking-tight sm:text-4xl">
             Launch Panel
-          </h1>
-          <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
+          </motion.h1>
+          <motion.p variants={fadeUp} className="mt-2 max-w-2xl text-sm text-muted-foreground">
             Configure and launch stress test runs. Methods and limits are set by your plan.
-          </p>
-        </header>
+          </motion.p>
+        </motion.header>
 
-        {noPlan && (
-          <div className="mb-6 flex items-center gap-3 rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-3">
-            <AlertTriangle className="h-4 w-4 shrink-0 text-amber-400" />
-            <p className="text-sm text-amber-300">
-              No plan assigned.{" "}
-              <Link to="/pricing" className="underline underline-offset-2 hover:text-amber-200 transition-colors">
-                View plans
-              </Link>{" "}
-              or contact your admin on Discord to get access.
-            </p>
-          </div>
-        )}
+        <AnimatePresence>
+          {noPlan && (
+            <motion.div
+              key="noplan"
+              initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
+              className="mb-6 flex items-center gap-3 rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-3"
+            >
+              <AlertTriangle className="h-4 w-4 shrink-0 text-amber-400" />
+              <p className="text-sm text-amber-300">
+                No plan assigned.{" "}
+                <Link to="/pricing" className="underline underline-offset-2 hover:text-amber-200 transition-colors">View plans</Link>{" "}
+                or contact your admin on Discord to get access.
+              </p>
+            </motion.div>
+          )}
+          {l4Busy && (
+            <motion.div
+              key="l4busy"
+              initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
+              className="mb-4 flex items-center gap-3 rounded-xl border border-red-500/20 bg-red-500/5 px-4 py-3"
+            >
+              <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-red-400" />
+              <p className="text-sm text-red-300">An L4 attack is currently running. New L4 attacks are locked until it finishes.</p>
+            </motion.div>
+          )}
+          {l7Busy && (
+            <motion.div
+              key="l7busy"
+              initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
+              className="mb-4 flex items-center gap-3 rounded-xl border border-orange-500/20 bg-orange-500/5 px-4 py-3"
+            >
+              <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-orange-400" />
+              <p className="text-sm text-orange-300">An L7 attack is currently running. New L7 attacks are locked until it finishes.</p>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
-        {l4Busy && (
-          <div className="mb-4 flex items-center gap-3 rounded-xl border border-red-500/20 bg-red-500/5 px-4 py-3">
-            <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-red-400" />
-            <p className="text-sm text-red-300">
-              An L4 attack is currently running. New L4 attacks are locked until it finishes.
-            </p>
-          </div>
-        )}
-
-        {l7Busy && (
-          <div className="mb-4 flex items-center gap-3 rounded-xl border border-orange-500/20 bg-orange-500/5 px-4 py-3">
-            <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-orange-400" />
-            <p className="text-sm text-orange-300">
-              An L7 attack is currently running. New L7 attacks are locked until it finishes.
-            </p>
-          </div>
-        )}
-
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
+        <motion.div
+          className="grid grid-cols-1 gap-6 lg:grid-cols-5"
+          variants={staggerContainer(0.1, 0.2)}
+          initial="hidden"
+          animate="visible"
+        >
           {/* Config card */}
-          <section className="lg:col-span-3">
+          <motion.section variants={scaleIn} className="lg:col-span-3">
             <div className="rounded-2xl border border-white/[0.08] bg-zinc-900/70 backdrop-blur-sm">
               <div className="flex items-center justify-between border-b border-white/[0.06] px-5 py-4">
                 <h2 className="text-sm font-semibold">New run</h2>
@@ -625,10 +643,10 @@ export default function Panel() {
                 </div>
               )}
             </div>
-          </section>
+          </motion.section>
 
           {/* Active runs */}
-          <section className="lg:col-span-2">
+          <motion.section variants={fadeUp} className="lg:col-span-2">
             <div className="rounded-2xl border border-white/[0.08] bg-zinc-900/70 backdrop-blur-sm">
               <div className="flex items-center justify-between border-b border-white/[0.06] px-5 py-4">
                 <h2 className="text-sm font-semibold">Active runs</h2>
@@ -670,8 +688,8 @@ export default function Panel() {
                 </ul>
               )}
             </div>
-          </section>
-        </div>
+          </motion.section>
+        </motion.div>
       </div>
       <div className="mt-12">
         <SiteFooter />
