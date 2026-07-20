@@ -285,7 +285,6 @@ export default function Panel() {
     // ── Save run record — always "running" so it appears in Active runs ──
     // started_at is set immediately; is_l4_busy will reflect it in ≤5 s.
     const table = layer === "L4" ? "l4_runs" : "l7_runs";
-    const hitCount = Object.keys(apiInstances).length;
 
     dbg("info", `Inserting run into ${table} (status=running, started_at=${startedAt})`);
     const { data: insertedRun, error: insertErr } = await supabase
@@ -305,7 +304,7 @@ export default function Panel() {
       dbg("error", "DB insert failed", insertErr.message);
       setLaunchError("Failed to save run: " + insertErr.message);
     } else {
-      dbg("info", `Run saved → id=${insertedRun?.id}  nodes_hit=${hitCount}`);
+      dbg("info", `Run saved → id=${insertedRun?.id}  nodes_hit=${nodesOnline}`);
       setTarget("");
       setPort("");
       fetchRuns();
