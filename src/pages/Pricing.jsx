@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Check, Zap, Rocket, Crown, Shield, ArrowRight } from "lucide-react";
+import { Check, Zap, Rocket, Crown, Shield, ArrowRight, X, MessageCircle, Ticket } from "lucide-react";
 import SiteFooter from "@/components/return/SiteFooter";
 
 const PLANS = [
@@ -85,7 +85,8 @@ const COMPARISON = [
 
 
 export default function Pricing() {
-  const [billing, setBilling] = useState("monthly");
+  const [billing,      setBilling]      = useState("monthly");
+  const [modalPlan,    setModalPlan]    = useState(null);
 
   return (
     <div className="relative z-10">
@@ -157,12 +158,13 @@ export default function Pricing() {
               </ul>
 
               <button
-              className={`mt-6 inline-flex w-full items-center justify-center gap-1.5 rounded-full px-4 py-2.5 text-xs font-medium transition-colors ${
-              p.highlight ?
-              "bg-white text-black hover:bg-zinc-200" :
-              "border border-white/[0.1] bg-white/[0.03] text-foreground hover:bg-white/[0.08]"}`
-              }>
-
+                onClick={() => setModalPlan(p)}
+                className={`mt-6 inline-flex w-full items-center justify-center gap-1.5 rounded-full px-4 py-2.5 text-xs font-medium transition-colors ${
+                  p.highlight
+                    ? "bg-white text-black hover:bg-zinc-200"
+                    : "border border-white/[0.1] bg-white/[0.03] text-foreground hover:bg-white/[0.08]"
+                }`}
+              >
                 Choose plan
                 <ArrowRight className="h-3.5 w-3.5" />
               </button>
@@ -214,6 +216,85 @@ export default function Pricing() {
       <div className="mt-16">
         <SiteFooter />
       </div>
+
+      {/* ── Plan selection modal ───────────────────────────────────────── */}
+      {modalPlan && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          onClick={() => setModalPlan(null)}
+        >
+          {/* Backdrop */}
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
+
+          {/* Card */}
+          <div
+            className="relative z-10 w-full max-w-md overflow-hidden rounded-2xl border border-white/[0.1] bg-zinc-900 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Close */}
+            <button
+              onClick={() => setModalPlan(null)}
+              className="absolute right-4 top-4 rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-white/[0.06] hover:text-foreground"
+            >
+              <X className="h-4 w-4" />
+            </button>
+
+            {/* Header */}
+            <div className="border-b border-white/[0.06] px-6 py-5">
+              <div className="flex items-center gap-3">
+                <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-500/10 ring-1 ring-indigo-500/20">
+                  <Ticket className="h-5 w-5 text-indigo-400" />
+                </span>
+                <div>
+                  <p className="font-semibold">Get the {modalPlan.name} plan</p>
+                  <p className="text-xs text-muted-foreground">{modalPlan.price}{modalPlan.period && `/${modalPlan.period.replace("/","")}`} · {modalPlan.tagline}</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Body */}
+            <div className="px-6 py-6 space-y-4">
+              <p className="text-sm text-zinc-300 leading-relaxed">
+                To purchase a plan, open a ticket in our Discord server. A staff member will assist you within minutes.
+              </p>
+
+              <ol className="space-y-3">
+                {[
+                  "Join our Discord server using the button below",
+                  "Head to the #open-ticket channel",
+                  'Click "Open Ticket" and select Plan Purchase',
+                  `Tell us you want the ${modalPlan.name} plan and complete payment`,
+                  "Your account will be upgraded instantly after confirmation",
+                ].map((step, i) => (
+                  <li key={i} className="flex items-start gap-3 text-sm text-zinc-400">
+                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-white/[0.06] font-mono text-[10px] font-semibold text-zinc-300">
+                      {i + 1}
+                    </span>
+                    {step}
+                  </li>
+                ))}
+              </ol>
+            </div>
+
+            {/* Footer */}
+            <div className="border-t border-white/[0.06] px-6 py-4 flex gap-3">
+              <a
+                href="/discord"
+                className="flex flex-1 items-center justify-center gap-2 rounded-full bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-indigo-500"
+              >
+                <MessageCircle className="h-4 w-4" />
+                Open Discord
+              </a>
+              <button
+                onClick={() => setModalPlan(null)}
+                className="rounded-full border border-white/[0.1] px-4 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-white/[0.04] hover:text-foreground"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>);
 
 }
