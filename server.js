@@ -4,8 +4,13 @@ import { createClient } from "@supabase/supabase-js";
 const app = express();
 app.use(express.json());
 
-const SUPABASE_URL     = process.env.VITE_SUPABASE_URL || "https://fyzbqbubsdkjrmppkdsl.supabase.co";
+const SUPABASE_URL         = process.env.VITE_SUPABASE_URL || "https://fyzbqbubsdkjrmppkdsl.supabase.co";
 const SUPABASE_SERVICE_KEY = process.env.VITE_SUPABASE_SERVICE_KEY;
+
+if (!SUPABASE_SERVICE_KEY) {
+  console.error("[proxy] FATAL: VITE_SUPABASE_SERVICE_KEY is not set — server cannot start safely.");
+  process.exit(1);
+}
 
 const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
   auth: { autoRefreshToken: false, persistSession: false },
@@ -28,7 +33,7 @@ async function requireAuth(req, res, next) {
     .eq("id", user.id)
     .single();
 
-  if (profileErr || !profile) return res.status(403).json({ error: "Profile not found" });
+  if (profileErr || !profile) return res.status(403).json({ error: profileErr?.message ?? "Profile not found" });
 
   req.user    = user;
   req.profile = profile;
@@ -71,7 +76,8 @@ async function checkPolicy(req, layer, method, duration) {
   }
 
   const rpcName = layer === "L4" ? "is_l4_busy" : "is_l7_busy";
-  const { data: busy } = await supabaseAdmin.rpc(rpcName);
+  const { data: busy, error: rpcErr } = await supabaseAdmin.rpc(rpcName);
+  if (rpcErr) return { ok: false, status: 500, error: `Could not check busy state: ${rpcErr.message}` };
   if (busy) return { ok: false, status: 409, error: `An ${layer} attack is already running. Wait for it to finish.` };
 
   return { ok: true };
@@ -297,24 +303,32 @@ app.patch("/proxy/admin/users/:id/profile", requireAuth, requireAdmin, async (re
 
 // ── Server-side auto-expire cleanup (runs every 30 s) ────────────────────────
 async function cleanupExpiredRuns() {
-  const now = new Date().toISOString();
-  for (const table of ["l4_runs", "l7_runs"]) {
-    const { data } = await supabaseAdmin
-      .from(table)
-      .select("id, started_at, duration")
-      .eq("status", "running");
-    if (!data?.length) continue;
-    const expired = data.filter((r) =>
-      r.started_at && new Date(r.started_at).getTime() + r.duration * 1000 <= Date.now()
-    );
-    if (expired.length) {
-      await Promise.all(
-        expired.map((r) =>
-          supabaseAdmin.from(table).update({ status: "success", stopped_at: now }).eq("id", r.id)
-        )
-      );
-      console.log(`[cleanup] Expired ${expired.length} run(s) in ${table}`);
+  try {
+    const now = new Date().toISOString();
+    for (const table of ["l4_runs", "l7_runs"]) {
+      const { data, error } = await supabaseAdmin
+        .from(table)
+        .select("id, started_at, duration")
+        .in("status", ["running", "queued"]);
+      if (error) { console.error(`[cleanup] Failed to fetch ${table}:`, error.message); continue; }
+      if (!data?.length) continue;
+      const expired = data.filter((r) => {
+        const base = r.started_at
+          ? new Date(r.started_at).getTime()
+          : 0; // queued with no started_at — will be caught by the +30s grace in Panel
+        return base > 0 && base + r.duration * 1000 <= Date.now();
+      });
+      if (expired.length) {
+        await Promise.allSettled(
+          expired.map((r) =>
+            supabaseAdmin.from(table).update({ status: "success", stopped_at: now }).eq("id", r.id)
+          )
+        );
+        console.log(`[cleanup] Expired ${expired.length} run(s) in ${table}`);
+      }
     }
+  } catch (err) {
+    console.error("[cleanup] Unhandled error:", err.message);
   }
 }
 setInterval(cleanupExpiredRuns, 30000);

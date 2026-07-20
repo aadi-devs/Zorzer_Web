@@ -1,4 +1,4 @@
-import React, { createContext, useState, useContext, useEffect } from 'react';
+import React, { createContext, useState, useContext, useEffect, useRef } from 'react';
 import { supabase } from './supabaseClient';
 
 const AuthContext = createContext();
@@ -28,14 +28,20 @@ export const AuthProvider = ({ children }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoadingAuth,   setIsLoadingAuth]   = useState(true);
 
+  // Counter to discard results from stale concurrent applySession calls.
+  const applySeqRef = useRef(0);
+
   const applySession = async (supabaseUser) => {
+    const seq = ++applySeqRef.current;
     if (supabaseUser) {
+      const prof = await fetchProfile(supabaseUser.id);
+      if (seq !== applySeqRef.current) return; // superseded by a newer call
       setUser(supabaseUser);
       setIsAuthenticated(true);
-      const prof = await fetchProfile(supabaseUser.id);
       setProfile(prof);
       setIsAdmin(!!prof?.is_admin);
     } else {
+      if (seq !== applySeqRef.current) return;
       setUser(null);
       setProfile(null);
       setIsAdmin(false);
@@ -51,6 +57,7 @@ export const AuthProvider = ({ children }) => {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
       await applySession(session?.user ?? null);
+      setIsLoadingAuth(false);
     });
 
     return () => subscription.unsubscribe();

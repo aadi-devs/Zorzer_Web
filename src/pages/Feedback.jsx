@@ -22,23 +22,29 @@ export default function Feedback() {
   const submit = async (e) => {
     e.preventDefault();
     setError("");
+    const trimmedMsg = form.message.trim();
+    if (trimmedMsg.length < 10) {
+      setError("Message must be at least 10 characters.");
+      return;
+    }
+    if (trimmedMsg.length > 2000) {
+      setError("Message must be under 2000 characters.");
+      return;
+    }
     setLoading(true);
     const { error: err } = await supabase.from("feedback").insert({
       user_id: user?.id || null,
-      name: form.name,
-      email: form.email,
-      topic: form.topic,
-      message: form.message,
+      name:    form.name.trim(),
+      email:   form.email.trim(),
+      topic:   form.topic,
+      message: trimmedMsg,
     });
     setLoading(false);
     if (err) {
       setError("Failed to send feedback. Please try again.");
     } else {
       setSent(true);
-      setTimeout(() => {
-        setSent(false);
-        setForm({ ...INIT, name: user?.user_metadata?.full_name || "", email: user?.email || "" });
-      }, 3000);
+      // Don't auto-reset — user reads the confirmation and resubmits manually if needed
     }
   };
 
@@ -118,23 +124,21 @@ export default function Feedback() {
                   <p className="text-xs text-red-400">{error}</p>
                 )}
 
-                <button
-                  type="submit"
-                  disabled={loading || sent}
-                  className="flex w-full items-center justify-center gap-2 rounded-full bg-white px-4 py-2.5 text-sm font-medium text-black ring-1 ring-white/10 transition-colors hover:bg-zinc-200 disabled:opacity-60"
-                >
-                  {sent ? (
-                    <>
-                      <CheckCircle2 className="h-4 w-4" />
-                      Message sent
-                    </>
-                  ) : (
-                    <>
-                      <Send className="h-4 w-4" />
-                      {loading ? "Sending…" : "Send feedback"}
-                    </>
-                  )}
-                </button>
+                {sent ? (
+                  <div className="flex items-center justify-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-4 py-2.5 text-sm font-medium text-emerald-300">
+                    <CheckCircle2 className="h-4 w-4" />
+                    Message sent — we'll get back to you soon
+                  </div>
+                ) : (
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="flex w-full items-center justify-center gap-2 rounded-full bg-white px-4 py-2.5 text-sm font-medium text-black ring-1 ring-white/10 transition-colors hover:bg-zinc-200 disabled:opacity-60"
+                  >
+                    <Send className="h-4 w-4" />
+                    {loading ? "Sending…" : "Send feedback"}
+                  </button>
+                )}
               </form>
             </div>
           </section>

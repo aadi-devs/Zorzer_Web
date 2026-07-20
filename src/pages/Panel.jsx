@@ -214,9 +214,36 @@ export default function Panel() {
     const startedAt = new Date().toISOString();
     dbg("info", `Launch started — layer=${layer} method=${method} target=${target.trim()} duration=${duration}s`);
 
-    // ── Fire API calls through server-side proxy (hides node URLs + payloads) ──
+    const table = layer === "L4" ? "l4_runs" : "l7_runs";
+
+    // ── 1. Insert run record as "queued" BEFORE firing any proxy calls.
+    //    This ensures the run is always tracked even if the browser closes mid-flight.
+    dbg("info", `Inserting run into ${table} (status=queued)…`);
+    const { data: insertedRun, error: insertErr } = await supabase
+      .from(table)
+      .insert({
+        user_id:    user.id,
+        target:     target.trim(),
+        ...(layer === "L4" && domain.trim() ? { domain: domain.trim() } : {}),
+        method,
+        duration,
+        status:     "queued",
+      })
+      .select("id")
+      .single();
+
+    if (insertErr) {
+      dbg("error", "DB insert failed", insertErr.message);
+      setLaunchError("Failed to save run: " + insertErr.message);
+      setLaunching(false);
+      return;
+    }
+    dbg("info", `Run queued → id=${insertedRun?.id}`);
+
+    // ── 2. Fire API calls through server-side proxy ────────────────────────
     let nodesOnline = 0;
     let nodesTotal  = 0;
+    let proxyOk     = false;
 
     const { data: { session } } = await supabase.auth.getSession();
     const authToken = session?.access_token ?? "";
@@ -234,6 +261,7 @@ export default function Panel() {
         if (!r.ok) throw new Error(json?.error ?? `HTTP ${r.status}`);
         nodesTotal  = json.total;
         nodesOnline = json.online;
+        proxyOk = true;
         json.results?.forEach((res, i) => {
           if (res.success) {
             dbg("info",  `✓ node ${i + 1} → instance_id=${res.instance_id}`);
@@ -266,6 +294,7 @@ export default function Panel() {
         if (!r.ok) throw new Error(json?.error ?? `HTTP ${r.status}`);
         nodesTotal  = json.total;
         nodesOnline = json.online;
+        proxyOk = true;
         json.results?.forEach((res, i) => {
           if (res.success) {
             dbg("info", `✓ node ${i + 1} → attack started`);
@@ -279,41 +308,24 @@ export default function Panel() {
         dbg("error", `L7 proxy error: ${err.message}`);
         setLaunchError(err.message);
       }
-
     }
 
-    // ── Save run record — always "running" so it appears in Active runs ──
-    // started_at is set immediately; is_l4_busy will reflect it in ≤5 s.
-    const table = layer === "L4" ? "l4_runs" : "l7_runs";
-
-    dbg("info", `Inserting run into ${table} (status=running, started_at=${startedAt})`);
-    const { data: insertedRun, error: insertErr } = await supabase
-      .from(table)
-      .insert({
-        user_id:    user.id,
-        target:     target.trim(),
-        ...(layer === "L4" && domain.trim() ? { domain: domain.trim() } : {}),
-        method,
-        duration,
-        status:     "running",
-        started_at: startedAt,
-      })
-      .select("id")
-      .single();
-
-    if (insertErr) {
-      dbg("error", "DB insert failed", insertErr.message);
-      setLaunchError("Failed to save run: " + insertErr.message);
+    // ── 3. Update run status based on proxy result ─────────────────────────
+    if (proxyOk) {
+      await supabase.from(table).update({ status: "running", started_at: startedAt }).eq("id", insertedRun.id);
+      dbg("info", `Run ${insertedRun.id} → status=running`);
     } else {
-      dbg("info", `Run saved → id=${insertedRun?.id}  nodes_hit=${nodesOnline}`);
-      setTarget("");
-      setPort("");
-      setDomain("");
-      fetchRuns();
-      fetchTodayCount();
-      checkBusy();
+      // Proxy call failed — mark as failed so it doesn't lock the busy state
+      await supabase.from(table).update({ status: "failed", stopped_at: new Date().toISOString() }).eq("id", insertedRun.id);
+      dbg("warn", `Run ${insertedRun.id} → status=failed (proxy error)`);
     }
 
+    setTarget("");
+    setPort("");
+    setDomain("");
+    fetchRuns();
+    fetchTodayCount();
+    checkBusy();
     setLaunching(false);
   }
 
@@ -446,9 +458,8 @@ export default function Panel() {
 
                   {/* Domain — L4 only, mandatory, stored for record-keeping */}
                   {layer === "L4" && (
-                    <Field label="Domain">
+                    <Field label="Domain (optional)">
                       <input
-                        required
                         type="text"
                         value={domain}
                         onChange={(e) => setDomain(e.target.value)}

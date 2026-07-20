@@ -71,8 +71,8 @@ export default function Dashboard() {
         supabase.rpc("is_l4_busy"),
         supabase.rpc("is_l7_busy"),
       ]);
-      setL4Busy(!!l4.data);
-      setL7Busy(!!l7.data);
+      if (!l4.error) setL4Busy(!!l4.data);
+      if (!l7.error) setL7Busy(!!l7.data);
     }
     checkConcurrent();
     const timer = setInterval(checkConcurrent, 5000);
@@ -100,7 +100,7 @@ export default function Dashboard() {
     },
     {
       label: "Plan Duration",
-      value: plan ? `${plan.max_duration}s` : "—",
+      value: plan ? (plan.max_duration ? `${plan.max_duration}s` : "∞") : "—",
       sub:   "Max per run",
       icon:  Gauge,
     },
@@ -226,7 +226,7 @@ export default function Dashboard() {
                   </p>
                   <div className="mt-4 space-y-3 text-sm">
                     <Row label="Concurrent" value="1 slot" />
-                    <Row label="Max duration" value={`${plan.max_duration}s`} />
+                    <Row label="Max duration" value={plan.max_duration ? `${plan.max_duration}s` : "∞"} />
                     <Row
                       label="Methods"
                       value={(plan.access_layers || []).join(" + ") || "—"}
