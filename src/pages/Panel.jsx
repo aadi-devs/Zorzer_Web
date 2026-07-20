@@ -312,6 +312,17 @@ export default function Panel() {
         };
 
         dbg("info", `Request body`, body);
+
+        // Pre-flight: stop any active attack on every node before starting a new one
+        dbg("info", `Pre-flight stop — clearing any active attack on all ${apis.length} node(s)…`);
+        await Promise.allSettled(
+          apis.map((api) =>
+            fetch(`${api.url}/api/attack/stop`, { method: "POST" }).catch(() => {})
+          )
+        );
+        // Brief pause so nodes process the stop before the next start
+        await new Promise((res) => setTimeout(res, 500));
+
         dbg("info", `Firing all ${apis.length} L7 node(s) simultaneously (15 s timeout each)…`);
 
         const results = await Promise.allSettled(
