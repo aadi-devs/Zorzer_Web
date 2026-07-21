@@ -360,7 +360,9 @@ export default function Panel() {
     const proxyHeaders = { "Content-Type": "application/json", Authorization: `Bearer ${authToken}` };
 
     const endpoint = runLayer === "L4" ? "/proxy/l4/stop" : "/proxy/l7/stop";
-    fetch(endpoint, { method: "POST", headers: proxyHeaders }).catch(() => {});
+    try {
+      await fetch(endpoint, { method: "POST", headers: proxyHeaders });
+    } catch (_) {}
 
     await supabase
       .from(_table)
