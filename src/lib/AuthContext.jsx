@@ -73,7 +73,10 @@ export const AuthProvider = ({ children }) => {
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
-      options: { data: { full_name: fullName || null } },
+      options: {
+        data: { full_name: fullName || null },
+        emailRedirectTo: `${window.location.origin}/auth/confirm`,
+      },
     });
     if (error) throw new Error(error.message);
 

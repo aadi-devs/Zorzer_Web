@@ -4,9 +4,48 @@ import { useAuth } from "@/lib/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { UserPlus, Mail, Lock, User, Loader2, CheckCircle } from "lucide-react";
+import { UserPlus, Mail, Lock, User, Loader2, CheckCircle, RefreshCw } from "lucide-react";
 import AuthLayout from "@/components/AuthLayout";
 import { supabase } from "@/lib/supabaseClient";
+
+function ResendButton({ email }) {
+  const [state, setState] = useState("idle"); // idle | sending | sent | error
+
+  const handleResend = async () => {
+    setState("sending");
+    const { error } = await supabase.auth.resend({
+      type: "signup",
+      email,
+      options: { emailRedirectTo: `${window.location.origin}/auth/confirm` },
+    });
+    setState(error ? "error" : "sent");
+    if (!error) setTimeout(() => setState("idle"), 30000);
+  };
+
+  if (state === "sent") {
+    return (
+      <p className="mt-4 text-center text-sm text-emerald-400">
+        ✓ New confirmation email sent.
+      </p>
+    );
+  }
+
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      className="mt-4 w-full text-muted-foreground hover:text-foreground"
+      onClick={handleResend}
+      disabled={state === "sending"}
+    >
+      {state === "sending" ? (
+        <><Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> Sending…</>
+      ) : (
+        <><RefreshCw className="mr-2 h-3.5 w-3.5" /> Resend confirmation email</>
+      )}
+    </Button>
+  );
+}
 
 export default function Register() {
   const { register } = useAuth();

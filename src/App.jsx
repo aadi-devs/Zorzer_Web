@@ -20,6 +20,7 @@ import Login from '@/pages/Login';
 import Register from '@/pages/Register';
 import ForgotPassword from '@/pages/ForgotPassword';
 import ResetPassword from '@/pages/ResetPassword';
+import AuthConfirm from '@/pages/AuthConfirm';
 
 const AdminRoute = ({ children }) => {
   const { isLoadingAuth, isAuthenticated, isAdmin } = useAuth();
@@ -100,6 +101,7 @@ function App() {
             <Route path="/register"       element={<Register />} />
             <Route path="/forgot-password" element={<ForgotPassword />} />
             <Route path="/reset-password" element={<ResetPassword />} />
+            <Route path="/auth/confirm"  element={<AuthConfirm />} />
             <Route path="/*"              element={<AuthenticatedApp />} />
           </Routes>
         </Router>
