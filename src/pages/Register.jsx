@@ -63,6 +63,10 @@ export default function Register() {
     e.preventDefault();
     setError("");
 
+    if (!fullName.trim()) {
+      setError("Display name is required.");
+      return;
+    }
     if (password !== confirmPassword) {
       setError("Passwords do not match.");
       return;
@@ -135,9 +139,9 @@ export default function Register() {
       )}
 
       <form onSubmit={handleSubmit} className="space-y-4">
-        {/* Full name (optional) */}
+        {/* Full name (required) */}
         <div className="space-y-2">
-          <Label htmlFor="fullName">Full name <span className="text-muted-foreground">(optional)</span></Label>
+          <Label htmlFor="fullName">Display name</Label>
           <div className="relative">
             <User className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -149,6 +153,7 @@ export default function Register() {
               value={fullName}
               onChange={(e) => setFullName(e.target.value)}
               className="h-12 pl-10"
+              required
             />
           </div>
         </div>

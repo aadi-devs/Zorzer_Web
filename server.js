@@ -320,6 +320,29 @@ app.post("/proxy/l4/stop", requireAuth, async (req, res) => {
   res.json({ ok: true });
 });
 
+// ── Admin: activity log ───────────────────────────────────────────────────────
+// GET /proxy/admin/activity
+app.get("/proxy/admin/activity", requireAuth, requireAdmin, async (req, res) => {
+  const [{ data: l4Data, error: e1 }, { data: l7Data, error: e2 }] = await Promise.all([
+    supabaseAdmin
+      .from("l4_runs")
+      .select("*, profile:profiles(full_name, email)")
+      .order("created_at", { ascending: false })
+      .limit(500),
+    supabaseAdmin
+      .from("l7_runs")
+      .select("*, profile:profiles(full_name, email)")
+      .order("created_at", { ascending: false })
+      .limit(500),
+  ]);
+  if (e1 || e2) return res.status(500).json({ error: (e1 || e2).message });
+  const combined = [
+    ...(l4Data || []).map((r) => ({ ...r, layer: "L4" })),
+    ...(l7Data || []).map((r) => ({ ...r, layer: "L7" })),
+  ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  res.json({ runs: combined });
+});
+
 // ── Admin: user management endpoints ─────────────────────────────────────────
 
 // GET /proxy/admin/users

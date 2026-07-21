@@ -39,25 +39,19 @@ export default function Activity() {
     if (!user || !isAdmin) return;
     async function fetchRuns() {
       setLoading(true);
-      // Admin: fetch all users' runs, joined with profiles for display name
-      const [{ data: l4Data }, { data: l7Data }] = await Promise.all([
-        supabase
-          .from("l4_runs")
-          .select("*, profile:profiles(full_name, email)")
-          .order("created_at", { ascending: false })
-          .limit(500),
-        supabase
-          .from("l7_runs")
-          .select("*, profile:profiles(full_name, email)")
-          .order("created_at", { ascending: false })
-          .limit(500),
-      ]);
-      const combined = [
-        ...(l4Data || []).map(r => ({ ...r, layer: "L4" })),
-        ...(l7Data || []).map(r => ({ ...r, layer: "L7" })),
-      ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-      setRuns(combined);
-      setLoading(false);
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const token = session?.access_token ?? "";
+        const res = await fetch("/proxy/admin/activity", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const json = await res.json();
+        setRuns(json.runs || []);
+      } catch (err) {
+        console.error("[Activity] fetch error:", err.message);
+      } finally {
+        setLoading(false);
+      }
     }
     fetchRuns();
   }, [user, isAdmin]);
