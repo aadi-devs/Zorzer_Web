@@ -46,3 +46,10 @@ $$;
 -- Grant execute to authenticated role so the JS client can call them
 GRANT EXECUTE ON FUNCTION is_l4_busy() TO authenticated;
 GRANT EXECUTE ON FUNCTION is_l7_busy() TO authenticated;
+
+-- Single-login IP lock fields
+ALTER TABLE public.profiles
+  ADD COLUMN IF NOT EXISTS login_ip text,
+  ADD COLUMN IF NOT EXISTS is_suspended boolean NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS suspended_at timestamptz,
+  ADD COLUMN IF NOT EXISTS suspended_reason text;
