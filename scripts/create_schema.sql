@@ -38,6 +38,10 @@ create table if not exists profiles (
   two_factor_enabled   boolean not null default false,
   email_notifications  boolean not null default true,
   auto_renew           boolean not null default true,
+  login_ip             text,
+  is_suspended         boolean not null default false,
+  suspended_at         timestamptz,
+  suspended_reason     text,
   created_at           timestamptz not null default now(),
   updated_at           timestamptz not null default now()
 );
