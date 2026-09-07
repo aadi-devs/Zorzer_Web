@@ -47,6 +47,16 @@ create table if not exists profiles (
 );
 
 -- ============================================
+-- SECURITY SETTINGS
+-- ============================================
+create table if not exists security_settings (
+  id                integer primary key default 1 check (id = 1),
+  ip_lock_enabled   boolean not null default false,
+  updated_at        timestamptz not null default now()
+);
+insert into security_settings (id, ip_lock_enabled) values (1, false) on conflict (id) do nothing;
+
+-- ============================================
 -- RUNS (stress test runs)
 -- ============================================
 create table if not exists runs (
@@ -91,6 +101,7 @@ create table if not exists feedback (
 -- ============================================
 alter table plans    enable row level security;
 alter table profiles enable row level security;
+alter table security_settings enable row level security;
 alter table runs     enable row level security;
 alter table news     enable row level security;
 alter table feedback enable row level security;
