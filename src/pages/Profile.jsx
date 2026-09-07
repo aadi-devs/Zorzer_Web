@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { Check, UserCircle, Crown, Zap, Rocket, Star } from "lucide-react";
+import { UserCircle, Crown, Zap, Rocket, Star } from "lucide-react";
 import SiteFooter from "@/components/return/SiteFooter";
 import { useAuth } from "@/lib/AuthContext";
 import { fadeUp, staggerContainer, scaleIn, fadeIn } from "@/lib/motion";

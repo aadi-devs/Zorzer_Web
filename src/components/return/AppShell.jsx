@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { NavLink, Outlet, Link, useNavigate } from "react-router-dom";
+import { NavLink, Outlet, Link } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   LayoutDashboard, Crosshair, CreditCard, Menu, X, ChevronDown,

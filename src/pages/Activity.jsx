@@ -32,9 +32,6 @@ export default function Activity() {
   const [runs,    setRuns]    = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // Redirect non-admins
-  if (!isLoadingAuth && !isAdmin) return <Navigate to="/dashboard" replace />;
-
   useEffect(() => {
     if (!user || !isAdmin) return;
     async function fetchRuns() {
@@ -55,6 +52,9 @@ export default function Activity() {
     }
     fetchRuns();
   }, [user, isAdmin]);
+
+  // Redirect non-admins
+  if (!isLoadingAuth && !isAdmin) return <Navigate to="/dashboard" replace />;
 
   const filtered = runs.filter((r) => {
     const layerOk =

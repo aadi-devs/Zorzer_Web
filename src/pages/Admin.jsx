@@ -6,7 +6,6 @@ import {
 } from "lucide-react";
 import SiteFooter from "@/components/return/SiteFooter";
 import { supabase } from "@/lib/supabaseClient";
-import { useAuth } from "@/lib/AuthContext";
 
 const TABS = [
   { id: "users",  label: "Users",  icon: Users },
