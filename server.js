@@ -1,5 +1,6 @@
 import express from "express";
 import { createHmac, timingSafeEqual } from "crypto";
+import { isIP } from "net";
 import { createClient } from "@supabase/supabase-js";
 
 const app = express();
@@ -220,6 +221,37 @@ async function fetchWithTimeout(url, options, ms = 15000) {
   }
 }
 
+// Safe node liveness check for dry-run allocation previews.
+// This never calls an attack or traffic endpoint.
+async function checkNodeAvailability(url) {
+  const baseUrl = String(url).replace(/\/+$/, "");
+  const healthUrl = `${baseUrl}/api/status`;
+
+  try {
+    const response = await fetchWithTimeout(healthUrl, {
+      method: "GET",
+      headers: { Accept: "application/json, text/plain;q=0.9" },
+      redirect: "manual",
+    }, 5000);
+
+    response.body?.cancel();
+    const online = response.ok;
+    return {
+      online,
+      statusCode: response.status,
+      checkUrl: response.url || healthUrl,
+      error: online ? null : `Health check HTTP ${response.status} ${response.statusText}`,
+    };
+  } catch (err) {
+    return {
+      online: false,
+      statusCode: null,
+      checkUrl: healthUrl,
+      error: err.name === "AbortError" ? "timed out (5 s)" : err.message,
+    };
+  }
+}
+
 // ── POST /proxy/l7/start ──────────────────────────────────────────────────────
 app.post("/proxy/l7/start", requireAuth, async (req, res) => {
   const { target, method, duration, launch_token } = req.body;
@@ -300,6 +332,85 @@ app.post("/proxy/l7/stop", requireAuth, async (req, res) => {
 });
 
 // ── POST /proxy/l4/start ──────────────────────────────────────────────────────
+// Safe dry-run only: reads the configured node list and prints a balanced
+// node-to-target allocation. It never contacts a node or starts traffic.
+app.post("/proxy/l4/allocation-preview", requireAuth, async (req, res) => {
+  const rawTargets = Array.isArray(req.body?.targets)
+    ? req.body.targets
+    : String(req.body?.targets ?? "").split(",");
+  const targets = [...new Set(rawTargets.map((value) => String(value).trim()).filter(Boolean))];
+
+  if (!targets.length) return res.status(400).json({ error: "Enter at least one IP address" });
+  if (targets.length > 64) return res.status(400).json({ error: "You can preview up to 64 IP addresses at a time" });
+
+  const invalidTargets = targets.filter((target) => !isIP(target));
+  if (invalidTargets.length) {
+    return res.status(400).json({
+      error: `Invalid IP address${invalidTargets.length === 1 ? "" : "es"}: ${invalidTargets.join(", ")}`,
+    });
+  }
+
+  const { data: apis, error } = await supabaseAdmin.from("layer4_apis").select("url").order("url");
+  if (error) return res.status(500).json({ error: "Failed to fetch configured L4 nodes" });
+
+  const configuredNodes = (apis ?? []).map((api, index) => ({
+    id: `node-${index + 1}`,
+    url: api.url,
+  }));
+
+  const nodeStatuses = await Promise.all(
+    configuredNodes.map(async (node) => ({
+      ...node,
+      ...(await checkNodeAvailability(node.url)),
+    }))
+  );
+  const onlineNodes = nodeStatuses.filter((node) => node.online);
+  const baseCount = Math.floor(onlineNodes.length / targets.length);
+  const remainder = onlineNodes.length % targets.length;
+  let nodeIndex = 0;
+
+  const assignments = targets.map((target, targetIndex) => {
+    const count = baseCount + (targetIndex < remainder ? 1 : 0);
+    const assignedNodes = onlineNodes.slice(nodeIndex, nodeIndex + count).map((node) => ({
+      ...node,
+      target,
+    }));
+    nodeIndex += count;
+    return { target, nodes: assignedNodes };
+  });
+
+  console.log(`[allocation-preview] user=${req.user.id} targets=${targets.length} configuredNodes=${configuredNodes.length} onlineNodes=${onlineNodes.length}`);
+  nodeStatuses.filter((node) => !node.online).forEach((node) => {
+    console.log(`[allocation-preview] offline ${node.id} (${node.url}) -> ${node.error}`);
+  });
+  assignments.forEach(({ target, nodes: assignedNodes }) => {
+    if (!assignedNodes.length) {
+      console.log(`[allocation-preview] target=${target} -> no node assigned`);
+      return;
+    }
+    assignedNodes.forEach((node) => {
+      console.log(`[allocation-preview] ${node.id} (${node.url}) -> ${target}`);
+    });
+  });
+
+  res.json({
+    dryRun: true,
+    targetCount: targets.length,
+    configuredNodeCount: configuredNodes.length,
+    onlineNodeCount: onlineNodes.length,
+    offlineNodeCount: configuredNodes.length - onlineNodes.length,
+    nodeCount: onlineNodes.length,
+    nodeStatuses: nodeStatuses.map(({ id, url, online, statusCode, error }) => ({
+      id,
+      url,
+      online,
+      statusCode,
+      error,
+    })),
+    assignments,
+  });
+});
+
 app.post("/proxy/l4/start", requireAuth, async (req, res) => {
   const { target, port, method, duration, launch_token } = req.body;
 

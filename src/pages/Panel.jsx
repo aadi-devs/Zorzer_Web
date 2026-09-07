@@ -67,6 +67,9 @@ export default function Panel() {
   const [l7Busy,      setL7Busy]      = useState(false);
   const [debugLogs,   setDebugLogs]   = useState([]);
   const [showDebug,   setShowDebug]   = useState(false);
+  const [allocationPreview, setAllocationPreview] = useState(null);
+  const [previewingAllocation, setPreviewingAllocation] = useState(false);
+  const [allocationError, setAllocationError] = useState("");
 
   const currentMethods = layer === "L4" ? l4Methods : l7Methods;
   const durations = ALL_DURATIONS.filter(d => maxDuration === 0 || d <= maxDuration);
@@ -254,10 +257,63 @@ export default function Panel() {
     setDebugLogs(prev => [entry, ...prev].slice(0, 200));
   }
 
+  async function previewAllocation() {
+    const targets = [...new Set(target.split(",").map((value) => value.trim()).filter(Boolean))];
+    if (!targets.length) {
+      setAllocationError("Enter one or more IP addresses first.");
+      setAllocationPreview(null);
+      return;
+    }
+
+    setAllocationError("");
+    setAllocationPreview(null);
+    setPreviewingAllocation(true);
+    dbg("info", `Allocation preview requested for ${targets.length} IP${targets.length === 1 ? "" : "s"}`);
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const response = await fetch("/proxy/l4/allocation-preview", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session?.access_token ?? ""}`,
+        },
+        body: JSON.stringify({ targets }),
+      });
+      const json = await response.json();
+      if (!response.ok) throw new Error(json?.error ?? `HTTP ${response.status}`);
+
+      setAllocationPreview(json);
+      dbg(
+        "info",
+        `Health check complete — ${json.onlineNodeCount}/${json.configuredNodeCount} node(s) online; only online nodes divided across ${json.targetCount} IP(s)`
+      );
+      (json.nodeStatuses || []).filter((node) => !node.online).forEach((node) => {
+        dbg("warn", `${node.id} excluded as offline${node.error ? ` (${node.error})` : ""}`);
+      });
+      json.assignments.forEach(({ target: assignedTarget, nodes: assignedNodes }) => {
+        if (!assignedNodes.length) {
+          dbg("warn", `${assignedTarget} → no node assigned`);
+          return;
+        }
+        assignedNodes.forEach((node) => dbg("info", `${node.id} → ${assignedTarget}`));
+      });
+    } catch (err) {
+      setAllocationError(err.message);
+      dbg("error", `Allocation preview failed: ${err.message}`);
+    } finally {
+      setPreviewingAllocation(false);
+    }
+  }
+
   async function launch(e) {
     e.preventDefault();
     if (!target.trim() || !method || !layer || !duration) return;
     if (needsPort && !port.trim()) return;
+    if (layer === "L4" && target.split(",").map((value) => value.trim()).filter(Boolean).length > 1) {
+      setLaunchError("Launch run accepts one target at a time. Use the allocation preview below to simulate multiple IPs.");
+      return;
+    }
     if (dailyLimitReached) {
       setLaunchError(`Daily limit reached (${maxDailyRuns} attacks/day). Resets at midnight.`);
       return;
@@ -542,15 +598,63 @@ export default function Panel() {
                   )}
 
                   {/* Target */}
-                  <Field label={layer === "L4" ? "Target IP" : "Target URL"}>
+                  <Field label={layer === "L4" ? "Target IP(s) — allocation preview" : "Target URL"}>
                     <input
                       required
                       type="text"
                       value={target}
                       onChange={(e) => setTarget(e.target.value)}
-                      placeholder={layer === "L4" ? "203.0.113.10" : "https://example.com"}
+                      placeholder={layer === "L4" ? "203.0.113.10, 203.0.113.11" : "https://example.com"}
                       className="w-full rounded-lg border border-white/[0.08] bg-black/40 px-3 py-2.5 font-mono text-sm outline-none ring-1 ring-transparent transition focus:border-white/20 focus:ring-white/10"
                     />
+                    {layer === "L4" && (
+                      <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-[11px] text-muted-foreground">
+                          Enter comma-separated IPs to preview node assignment. No traffic is sent.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={previewAllocation}
+                          disabled={previewingAllocation}
+                          className="rounded-md border border-cyan-400/30 bg-cyan-400/10 px-2.5 py-1.5 text-[11px] font-medium text-cyan-200 transition-colors hover:bg-cyan-400/15 disabled:opacity-50"
+                        >
+                          {previewingAllocation ? "Previewing…" : "Preview allocation"}
+                        </button>
+                      </div>
+                    )}
+                    {allocationError && layer === "L4" && (
+                      <p className="mt-2 text-xs text-red-400">{allocationError}</p>
+                    )}
+                    {allocationPreview && layer === "L4" && (
+                      <div className="mt-3 rounded-lg border border-cyan-400/20 bg-cyan-400/5 p-3">
+                        <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                          <span className="font-medium text-cyan-100">Dry-run allocation</span>
+                          <span className="font-mono text-cyan-200/70">
+                            {allocationPreview.onlineNodeCount} online / {allocationPreview.configuredNodeCount} configured · {allocationPreview.targetCount} IP(s)
+                          </span>
+                        </div>
+                        <div className="space-y-1.5">
+                          {allocationPreview.assignments.map(({ target: assignedTarget, nodes: assignedNodes }) => (
+                            <div key={assignedTarget} className="flex flex-col gap-1 rounded-md border border-white/[0.06] bg-black/20 px-2.5 py-2 sm:flex-row sm:items-start sm:gap-3">
+                              <span className="shrink-0 font-mono text-xs text-zinc-200">{assignedTarget}</span>
+                              <span className="text-[11px] text-muted-foreground">
+                                {assignedNodes.length
+                                  ? assignedNodes.map((node) => node.id).join(", ")
+                                  : "no node assigned"}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                        {allocationPreview.offlineNodeCount > 0 && (
+                          <p className="mt-2 text-[10px] text-amber-200/75">
+                            {allocationPreview.offlineNodeCount} offline node(s) excluded from the assignment.
+                          </p>
+                        )}
+                        <p className="mt-2 text-[10px] text-cyan-200/60">
+                          Health checks only — no attack or traffic endpoint was contacted.
+                        </p>
+                      </div>
+                    )}
                   </Field>
 
                   {/* Domain — L4 only, mandatory, stored for record-keeping */}
