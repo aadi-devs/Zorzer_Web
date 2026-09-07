@@ -100,7 +100,7 @@ async function requireAuth(req, res, next) {
     .single();
 
   if (profileErr || !profile) return res.status(403).json({ error: profileErr?.message ?? "Profile not found" });
-  if (await isIpLockEnabled() && profile.is_suspended) return res.status(403).json({ error: "This account is suspended. Contact an administrator.", code: "ACCOUNT_SUSPENDED" });
+  if (await isIpLockEnabled() && profile.is_suspended && !profile.is_admin) return res.status(403).json({ error: "This account is suspended. Contact an administrator.", code: "ACCOUNT_SUSPENDED" });
 
   req.user    = user;
   req.profile = profile;
