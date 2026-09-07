@@ -1,0 +1,12 @@
+{
+  "installCommand": "npm install --legacy-peer-deps",
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "rewrites": [
+    { "source": "/proxy/:path*", "destination": "/api/index" },
+    { "source": "/(.*)",         "destination": "/index.html" }
+  ],
+  "crons": [
+    { "path": "/proxy/__cron?secret=FpbYSE50tedmB-BkVMRUrcX9GICt_V5R", "schedule": "0 0 * * *" }
+  ]
+}

@@ -1,0 +1,34 @@
+import { useLocation, useNavigate } from 'react-router-dom';
+
+export default function PageNotFound() {
+  const location = useLocation();
+  const navigate  = useNavigate();
+  const segments  = location.pathname.split("/").filter(Boolean);
+  const pageName  = segments.join(" / ") || "this page";
+
+  return (
+    <div className="min-h-screen flex items-center justify-center p-6 bg-background">
+      <div className="max-w-md w-full text-center space-y-6">
+        <div className="space-y-2">
+          <h1 className="text-7xl font-light text-muted-foreground/40">404</h1>
+          <div className="h-0.5 w-16 bg-border mx-auto" />
+        </div>
+        <div className="space-y-3">
+          <h2 className="text-2xl font-medium text-foreground">Page Not Found</h2>
+          <p className="text-muted-foreground leading-relaxed">
+            <span className="font-medium text-foreground">"{pageName}"</span> could not be found.
+          </p>
+        </div>
+        <button
+          onClick={() => navigate('/', { replace: true })}
+          className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium rounded-full bg-white text-black ring-1 ring-white/10 hover:bg-zinc-200 transition-colors"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+          </svg>
+          Go Home
+        </button>
+      </div>
+    </div>
+  );
+}
