@@ -391,7 +391,18 @@ app.get("/proxy/admin/activity", requireAuth, requireAdmin, async (req, res) => 
 app.get("/proxy/admin/users", requireAuth, requireAdmin, async (req, res) => {
   const { data, error } = await supabaseAdmin.auth.admin.listUsers();
   if (error) return res.status(500).json({ error: error.message });
-  res.json({ users: data.users || [] });
+
+  const users = data.users || [];
+  const ids = users.map((user) => user.id);
+  const { data: securityRows, error: securityError } = ids.length
+    ? await supabaseAdmin.from("profiles").select("id, is_suspended, login_ip, suspended_at, suspended_reason").in("id", ids)
+    : { data: [], error: null };
+  if (securityError) return res.status(500).json({ error: securityError.message });
+
+  const securityById = Object.fromEntries((securityRows || []).map((row) => [row.id, row]));
+  res.json({
+    users: users.map((user) => ({ ...user, security: securityById[user.id] || null })),
+  });
 });
 
 // POST /proxy/admin/users — create user
