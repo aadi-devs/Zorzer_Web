@@ -70,6 +70,21 @@ function consumeLaunchToken(rawToken, userId) {
   }
 }
 
+// The setting is stored server-side so the admin switch applies before login.
+// Fail open if the setting table is temporarily unavailable; the feature defaults off.
+async function isIpLockEnabled() {
+  const { data, error } = await supabaseAdmin
+    .from("security_settings")
+    .select("ip_lock_enabled")
+    .eq("id", 1)
+    .maybeSingle();
+  if (error) {
+    console.error("[security] Could not read IP lock setting:", error.message);
+    return false;
+  }
+  return data?.ip_lock_enabled === true;
+}
+
 // ── Auth middleware — verify JWT and load profile ─────────────────────────────
 async function requireAuth(req, res, next) {
   const token = req.headers.authorization?.replace("Bearer ", "");
@@ -85,7 +100,7 @@ async function requireAuth(req, res, next) {
     .single();
 
   if (profileErr || !profile) return res.status(403).json({ error: profileErr?.message ?? "Profile not found" });
-  if (profile.is_suspended) return res.status(403).json({ error: "This account is suspended. Contact an administrator.", code: "ACCOUNT_SUSPENDED" });
+  if (await isIpLockEnabled() && profile.is_suspended) return res.status(403).json({ error: "This account is suspended. Contact an administrator.", code: "ACCOUNT_SUSPENDED" });
 
   req.user    = user;
   req.profile = profile;
@@ -102,13 +117,15 @@ function requireAdmin(req, res, next) {
 // ── Single-login IP lock ──────────────────────────────────────────────────────
 function getClientIp(req) {
   const forwarded = req.headers["x-forwarded-for"];
-  const raw = req.ip || req.headers["x-real-ip"] || (typeof forwarded === "string" ? forwarded.split(",")[0] : "") || req.socket.remoteAddress || "";
+  const raw = req.headers["cf-connecting-ip"] || req.headers["x-real-ip"] || req.ip || (typeof forwarded === "string" ? forwarded.split(",")[0] : "") || req.socket.remoteAddress || "";
   return String(raw).trim().replace(/^::ffff:/, "");
 }
 
 // Called immediately after password authentication. The first IP is trusted;
 // a later login from another IP suspends the account until an admin unlocks it.
 app.post("/proxy/security/check-login", requireAuth, async (req, res) => {
+  if (!(await isIpLockEnabled())) return res.json({ ok: true, enforcementEnabled: false });
+
   const ip = getClientIp(req);
   if (!ip || ip === "unknown") return res.status(503).json({ error: "Could not determine the login network. Try again." });
 
@@ -386,6 +403,29 @@ app.get("/proxy/admin/activity", requireAuth, requireAdmin, async (req, res) => 
 });
 
 // ── Admin: user management endpoints ─────────────────────────────────────────
+
+// GET/PATCH /proxy/admin/security-settings — global IP lock switch
+app.get("/proxy/admin/security-settings", requireAuth, requireAdmin, async (req, res) => {
+  const { data, error } = await supabaseAdmin
+    .from("security_settings")
+    .select("ip_lock_enabled, updated_at")
+    .eq("id", 1)
+    .maybeSingle();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ ip_lock_enabled: data?.ip_lock_enabled === true, updated_at: data?.updated_at ?? null });
+});
+
+app.patch("/proxy/admin/security-settings", requireAuth, requireAdmin, async (req, res) => {
+  const { ip_lock_enabled } = req.body;
+  if (typeof ip_lock_enabled !== "boolean") return res.status(400).json({ error: "ip_lock_enabled must be a boolean" });
+  const { data, error } = await supabaseAdmin
+    .from("security_settings")
+    .upsert({ id: 1, ip_lock_enabled, updated_at: new Date().toISOString() }, { onConflict: "id" })
+    .select("ip_lock_enabled, updated_at")
+    .single();
+  if (error) return res.status(400).json({ error: error.message });
+  res.json(data);
+});
 
 // GET /proxy/admin/users
 app.get("/proxy/admin/users", requireAuth, requireAdmin, async (req, res) => {
