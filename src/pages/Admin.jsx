@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import {
   Shield, Users, Newspaper, CreditCard,
   Plus, Trash2, Save, Loader2,
-  Eye, EyeOff, UserPlus, RefreshCw, AlertTriangle, X,
+  Eye, EyeOff, UserPlus, RefreshCw, AlertTriangle, X, Unlock,
 } from "lucide-react";
 import SiteFooter from "@/components/return/SiteFooter";
 import { supabase } from "@/lib/supabaseClient";
@@ -156,6 +156,19 @@ function UsersTab() {
     }
   }
 
+  async function unlockUser(id) {
+    try {
+      await adminFetch(`/proxy/admin/users/${id}/unlock`, { method: "POST" });
+      setUsers(current => current.map(user => user.id === id
+        ? { ...user, security: { ...user.security, is_suspended: false, login_ip: null, suspended_at: null } }
+        : user
+      ));
+      setFlash({ msg: "Account unlocked. Its next login will establish a new trusted IP.", type: "success" });
+    } catch (err) {
+      setFlash({ msg: err.message, type: "error" });
+    }
+  }
+
   return (
     <div className="space-y-6">
       {confirm && (
@@ -237,10 +250,21 @@ function UsersTab() {
                   </p>
                 </div>
                 <span className={`rounded-md border px-2 py-0.5 text-[10px] ${
-                  u.email_confirmed_at ? "border-white/10 text-zinc-400" : "border-amber-500/20 text-amber-400"
+                  u.security?.is_suspended
+                    ? "border-red-500/20 text-red-300"
+                    : u.email_confirmed_at ? "border-white/10 text-zinc-400" : "border-amber-500/20 text-amber-400"
                 }`}>
-                  {u.email_confirmed_at ? "active" : "unconfirmed"}
+                  {u.security?.is_suspended ? "suspended" : u.email_confirmed_at ? "active" : "unconfirmed"}
                 </span>
+                {u.security?.is_suspended && (
+                  <button
+                    onClick={() => unlockUser(u.id)}
+                    title="Unlock account"
+                    className="rounded-md p-1.5 text-amber-300 transition-colors hover:bg-amber-500/10"
+                  >
+                    <Unlock className="h-3.5 w-3.5" />
+                  </button>
+                )}
                 <button
                   onClick={() => setConfirm({ id: u.id, email: u.email })}
                   className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-red-500/10 hover:text-red-400"
