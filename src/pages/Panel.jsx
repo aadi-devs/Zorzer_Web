@@ -365,17 +365,6 @@ export default function Panel() {
     e.preventDefault();
     if (!target.trim() || !method || !layer || !duration) return;
     if (needsPort && !port.trim()) return;
-    if (
-      layer === "L4" &&
-      target
-        .split(",")
-        .map((value) => value.trim())
-        .filter(Boolean).length > 1
-    ) {
-      setLaunchError(
-        "Launch run accepts one target at a time. Use the allocation preview below to simulate multiple IPs.",
-      );
-      return;
     }
     if (dailyLimitReached) {
       setLaunchError(
