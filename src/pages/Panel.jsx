@@ -365,7 +365,6 @@ export default function Panel() {
     e.preventDefault();
     if (!target.trim() || !method || !layer || !duration) return;
     if (needsPort && !port.trim()) return;
-    }
     if (dailyLimitReached) {
       setLaunchError(
         `Daily limit reached (${maxDailyRuns} attacks/day). Resets at midnight.`,
