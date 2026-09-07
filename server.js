@@ -4,6 +4,7 @@ import { createClient } from "@supabase/supabase-js";
 
 const app = express();
 app.use(express.json());
+app.set("trust proxy", true);
 
 const SUPABASE_URL         = process.env.VITE_SUPABASE_URL || "https://fyzbqbubsdkjrmppkdsl.supabase.co";
 const SUPABASE_SERVICE_KEY = process.env.VITE_SUPABASE_SERVICE_KEY;
@@ -79,11 +80,12 @@ async function requireAuth(req, res, next) {
 
   const { data: profile, error: profileErr } = await supabaseAdmin
     .from("profiles")
-    .select("id, is_admin, plan_id, plan:plans(id, name, methods, access_layers, max_duration, max_daily_runs)")
+    .select("id, is_admin, is_suspended, plan_id, plan:plans(id, name, methods, access_layers, max_duration, max_daily_runs)")
     .eq("id", user.id)
     .single();
 
   if (profileErr || !profile) return res.status(403).json({ error: profileErr?.message ?? "Profile not found" });
+  if (profile.is_suspended) return res.status(403).json({ error: "This account is suspended. Contact an administrator.", code: "ACCOUNT_SUSPENDED" });
 
   req.user    = user;
   req.profile = profile;
@@ -96,6 +98,46 @@ function requireAdmin(req, res, next) {
   if (!req.isAdmin) return res.status(403).json({ error: "Admin access required" });
   next();
 }
+
+// ── Single-login IP lock ──────────────────────────────────────────────────────
+function getClientIp(req) {
+  const forwarded = req.headers["x-forwarded-for"];
+  const raw = req.ip || req.headers["x-real-ip"] || (typeof forwarded === "string" ? forwarded.split(",")[0] : "") || req.socket.remoteAddress || "";
+  return String(raw).trim().replace(/^::ffff:/, "");
+}
+
+// Called immediately after password authentication. The first IP is trusted;
+// a later login from another IP suspends the account until an admin unlocks it.
+app.post("/proxy/security/check-login", requireAuth, async (req, res) => {
+  const ip = getClientIp(req);
+  if (!ip || ip === "unknown") return res.status(503).json({ error: "Could not determine the login network. Try again." });
+
+  const { data: profile, error: profileErr } = await supabaseAdmin
+    .from("profiles")
+    .select("login_ip, is_suspended")
+    .eq("id", req.user.id)
+    .single();
+  if (profileErr || !profile) return res.status(500).json({ error: "Could not verify account security." });
+  if (profile.is_suspended) return res.status(403).json({ error: "This account is suspended. Contact an administrator.", code: "ACCOUNT_SUSPENDED" });
+
+  if (!profile.login_ip) {
+    const { error } = await supabaseAdmin.from("profiles").update({ login_ip: ip }).eq("id", req.user.id);
+    if (error) return res.status(500).json({ error: "Could not save the login network." });
+    return res.json({ ok: true, firstLogin: true });
+  }
+
+  if (profile.login_ip !== ip) {
+    const { error } = await supabaseAdmin.from("profiles").update({
+      is_suspended: true,
+      suspended_at: new Date().toISOString(),
+      suspended_reason: "Login from an unrecognized IP address",
+    }).eq("id", req.user.id);
+    if (error) return res.status(500).json({ error: "Could not suspend the account safely." });
+    return res.status(403).json({ error: "This account was suspended because it was accessed from a different network.", code: "ACCOUNT_SUSPENDED" });
+  }
+
+  return res.json({ ok: true, firstLogin: false });
+});
 
 // ── GET /proxy/launch-token ───────────────────────────────────────────────────
 app.get("/proxy/launch-token", requireAuth, (req, res) => {
@@ -393,6 +435,19 @@ app.patch("/proxy/admin/users/:id/profile", requireAuth, requireAdmin, async (re
   if (is_admin   !== undefined) update.is_admin  = is_admin;
 
   const { error } = await supabaseAdmin.from("profiles").update(update).eq("id", id);
+  if (error) return res.status(400).json({ error: error.message });
+  res.json({ ok: true });
+});
+
+// POST /proxy/admin/users/:id/unlock — clear the IP lock and suspension
+app.post("/proxy/admin/users/:id/unlock", requireAuth, requireAdmin, async (req, res) => {
+  const { id } = req.params;
+  const { error } = await supabaseAdmin.from("profiles").update({
+    login_ip: null,
+    is_suspended: false,
+    suspended_at: null,
+    suspended_reason: null,
+  }).eq("id", id);
   if (error) return res.status(400).json({ error: error.message });
   res.json({ ok: true });
 });
