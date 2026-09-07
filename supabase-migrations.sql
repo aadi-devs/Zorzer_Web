@@ -53,3 +53,14 @@ ALTER TABLE public.profiles
   ADD COLUMN IF NOT EXISTS is_suspended boolean NOT NULL DEFAULT false,
   ADD COLUMN IF NOT EXISTS suspended_at timestamptz,
   ADD COLUMN IF NOT EXISTS suspended_reason text;
+
+-- Global switch for single-login IP suspension
+CREATE TABLE IF NOT EXISTS public.security_settings (
+  id integer PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+  ip_lock_enabled boolean NOT NULL DEFAULT false,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+INSERT INTO public.security_settings (id, ip_lock_enabled)
+VALUES (1, false)
+ON CONFLICT (id) DO NOTHING;
+ALTER TABLE public.security_settings ENABLE ROW LEVEL SECURITY;
