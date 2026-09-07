@@ -66,6 +66,19 @@ export const AuthProvider = ({ children }) => {
   const login = async (email, password) => {
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) throw new Error(error.message);
+
+    // Bind the account to its first trusted IP on the server. A different IP
+    // suspends the account and immediately signs this session back out.
+    const securityResponse = await fetch("/proxy/security/check-login", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${data.session?.access_token ?? ""}` },
+    });
+    const securityResult = await securityResponse.json().catch(() => ({}));
+    if (!securityResponse.ok) {
+      await supabase.auth.signOut();
+      throw new Error(securityResult.error || "This account is not allowed to log in from this network.");
+    }
+
     return data.user;
   };
 
