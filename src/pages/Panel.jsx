@@ -17,6 +17,19 @@ const ALL_DURATIONS = [30, 60, 120, 180, 300, 600, 1200, 3600];
 const ALL_L4_METHODS = ["UDP-NORMAL", "UDP-BYPASS", "ICMP"];
 const ALL_L7_METHODS = ["HTTP-GET", "HTTP-POST", "API-FLOOD", "RAPID-RESET"];
 
+const ATTACK_FORM_STORAGE_KEY = "zorzer:last-attack-inputs";
+
+function readLastAttackInputs(userId) {
+  if (typeof window === "undefined" || !userId) return {};
+  try {
+    const raw = window.localStorage.getItem(`${ATTACK_FORM_STORAGE_KEY}:${userId}`);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
 export default function Panel() {
   const { user, profile, isAdmin } = useAuth();
   const plan = profile?.plan || null;
@@ -38,12 +51,28 @@ export default function Panel() {
   const defaultLayer  = hasL4 ? "L4" : hasL7 ? "L7" : null;
   const defaultMethod = hasL4 ? l4Methods[0] : hasL7 ? l7Methods[0] : null;
 
-  const [layer,       setLayer]       = useState(defaultLayer);
-  const [method,      setMethod]      = useState(defaultMethod);
-  const [target,      setTarget]      = useState("");
-  const [domain,      setDomain]      = useState("");
-  const [port,        setPort]        = useState("");
-  const [duration,    setDuration]    = useState(null);
+  const [savedAttackInputs] = useState(() => readLastAttackInputs(user?.id));
+  const restoredLayer = allowedLayers.includes(savedAttackInputs.layer)
+    ? savedAttackInputs.layer
+    : defaultLayer;
+  const restoredMethods = restoredLayer === "L4" ? l4Methods : l7Methods;
+  const restoredMethod = restoredMethods.includes(savedAttackInputs.method)
+    ? savedAttackInputs.method
+    : (restoredMethods[0] || null);
+  const parsedDuration = Number(savedAttackInputs.duration);
+  const restoredDuration = savedAttackInputs.duration != null
+    && Number.isFinite(parsedDuration)
+    && (maxDuration === 0 || parsedDuration <= maxDuration)
+    && ALL_DURATIONS.includes(parsedDuration)
+    ? parsedDuration
+    : null;
+
+  const [layer,       setLayer]       = useState(restoredLayer);
+  const [method,      setMethod]      = useState(restoredMethod);
+  const [target,      setTarget]      = useState(savedAttackInputs.target || "");
+  const [domain,      setDomain]      = useState(savedAttackInputs.domain || "");
+  const [port,        setPort]        = useState(savedAttackInputs.port || "");
+  const [duration,    setDuration]    = useState(restoredDuration);
   const [launching,   setLaunching]   = useState(false);
   const [launchError, setLaunchError] = useState("");
   const [launchInfo,  setLaunchInfo]  = useState("");
@@ -69,6 +98,19 @@ export default function Panel() {
       setDuration(durations[0]);
     }
   }, [plan]);
+
+  // Keep the latest form values in this browser for the current account.
+  useEffect(() => {
+    if (!user?.id) return;
+    try {
+      window.localStorage.setItem(
+        `${ATTACK_FORM_STORAGE_KEY}:${user.id}`,
+        JSON.stringify({ layer, method, target, domain, port, duration })
+      );
+    } catch {
+      // Browser storage can be unavailable in private or restricted contexts.
+    }
+  }, [user?.id, layer, method, target, domain, port, duration]);
 
   // Keep method in sync when switching layers
   const selectLayer = (l) => {
