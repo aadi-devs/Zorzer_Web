@@ -50,17 +50,34 @@ export const AuthProvider = ({ children }) => {
   };
 
   useEffect(() => {
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      await applySession(session?.user ?? null);
-      setIsLoadingAuth(false);
+    let mounted = true;
+
+    // Subscribe before reading storage so a sign-in or refresh event cannot be
+    // missed while the persisted session is being restored. Supabase emits an
+    // INITIAL_SESSION event here; getSession() is the single source for that
+    // initial state, so ignore only that duplicate event.
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "INITIAL_SESSION") return;
+      void applySession(session?.user ?? null).catch((err) => {
+        console.error("[AuthContext] auth state restore error:", err.message);
+      });
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      await applySession(session?.user ?? null);
-      setIsLoadingAuth(false);
-    });
+    supabase.auth.getSession()
+      .then(async ({ data: { session } }) => {
+        await applySession(session?.user ?? null);
+      })
+      .catch((err) => {
+        console.error("[AuthContext] session restore error:", err.message);
+      })
+      .finally(() => {
+        if (mounted) setIsLoadingAuth(false);
+      });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   const login = async (email, password) => {
