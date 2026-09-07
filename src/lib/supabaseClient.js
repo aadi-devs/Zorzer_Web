@@ -8,4 +8,13 @@ if (!supabaseUrl || !supabaseAnonKey) {
 }
 
 // Regular client — uses anon key, respects RLS
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    // Keep the Supabase session in the browser so page reloads do not require
+    // the user to authenticate again. Supabase refreshes the access token as needed.
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true,
+    storage: typeof window !== "undefined" ? window.localStorage : undefined,
+  },
+});
