@@ -102,8 +102,22 @@ function UsersTab() {
   const [saving, setSaving]     = useState(false);
   const [flash, setFlash]       = useState({ msg: "", type: "success" });
   const [confirm, setConfirm]   = useState(null); // { id, email }
+  const [ipLockEnabled, setIpLockEnabled] = useState(false);
+  const [securityLoaded, setSecurityLoaded] = useState(false);
+  const [securitySaving, setSecuritySaving] = useState(false);
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const loadSecuritySettings = useCallback(async () => {
+    try {
+      const json = await adminFetch("/proxy/admin/security-settings");
+      setIpLockEnabled(json.ip_lock_enabled === true);
+    } catch (err) {
+      setFlash({ msg: err.message, type: "error" });
+    } finally {
+      setSecurityLoaded(true);
+    }
+  }, []);
 
   const loadUsers = useCallback(async () => {
     try {
@@ -119,7 +133,28 @@ function UsersTab() {
       if (data) { setPlans(data); set("plan_id", data[0]?.id || ""); }
     });
     loadUsers();
-  }, [loadUsers]);
+    loadSecuritySettings();
+  }, [loadUsers, loadSecuritySettings]);
+
+  async function toggleIpLock() {
+    setSecuritySaving(true);
+    try {
+      const nextValue = !ipLockEnabled;
+      const json = await adminFetch("/proxy/admin/security-settings", {
+        method: "PATCH",
+        body: JSON.stringify({ ip_lock_enabled: nextValue }),
+      });
+      setIpLockEnabled(json.ip_lock_enabled === true);
+      setFlash({
+        msg: nextValue ? "IP suspension protection enabled." : "IP suspension protection disabled.",
+        type: "success",
+      });
+    } catch (err) {
+      setFlash({ msg: err.message, type: "error" });
+    } finally {
+      setSecuritySaving(false);
+    }
+  }
 
   async function createUser(e) {
     e.preventDefault();
@@ -178,6 +213,34 @@ function UsersTab() {
           onCancel={() => setConfirm(null)}
         />
       )}
+
+      {/* Global protection switch */}
+      <div className="rounded-2xl border border-white/[0.08] bg-zinc-900/70 p-5 backdrop-blur-sm">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <Shield className="h-4 w-4 text-muted-foreground" />
+              <h2 className="text-sm font-semibold">Single-IP suspension protection</h2>
+            </div>
+            <p className="mt-1 max-w-2xl text-xs text-muted-foreground">
+              When enabled, a login from a different visitor IP suspends the account. Cloudflare visitor IPs are supported.
+            </p>
+            {!ipLockEnabled && securityLoaded && (
+              <p className="mt-2 text-[11px] text-amber-300">Protection is currently off. Existing suspension records are preserved.</p>
+            )}
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={ipLockEnabled}
+            disabled={!securityLoaded || securitySaving}
+            onClick={toggleIpLock}
+            className={`relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${ipLockEnabled ? "bg-emerald-500" : "bg-white/15"}`}
+          >
+            <span className={`absolute top-1 h-4 w-4 rounded-full bg-white transition-transform ${ipLockEnabled ? "translate-x-6" : "translate-x-1"}`} />
+          </button>
+        </div>
+      </div>
 
       {/* Create form */}
       <div className="rounded-2xl border border-white/[0.08] bg-zinc-900/70 backdrop-blur-sm">
