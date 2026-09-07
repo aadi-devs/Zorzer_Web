@@ -51,28 +51,13 @@ export default function Panel() {
   const defaultLayer  = hasL4 ? "L4" : hasL7 ? "L7" : null;
   const defaultMethod = hasL4 ? l4Methods[0] : hasL7 ? l7Methods[0] : null;
 
-  const [savedAttackInputs] = useState(() => readLastAttackInputs(user?.id));
-  const restoredLayer = allowedLayers.includes(savedAttackInputs.layer)
-    ? savedAttackInputs.layer
-    : defaultLayer;
-  const restoredMethods = restoredLayer === "L4" ? l4Methods : l7Methods;
-  const restoredMethod = restoredMethods.includes(savedAttackInputs.method)
-    ? savedAttackInputs.method
-    : (restoredMethods[0] || null);
-  const parsedDuration = Number(savedAttackInputs.duration);
-  const restoredDuration = savedAttackInputs.duration != null
-    && Number.isFinite(parsedDuration)
-    && (maxDuration === 0 || parsedDuration <= maxDuration)
-    && ALL_DURATIONS.includes(parsedDuration)
-    ? parsedDuration
-    : null;
-
-  const [layer,       setLayer]       = useState(restoredLayer);
-  const [method,      setMethod]      = useState(restoredMethod);
-  const [target,      setTarget]      = useState(savedAttackInputs.target || "");
-  const [domain,      setDomain]      = useState(savedAttackInputs.domain || "");
-  const [port,        setPort]        = useState(savedAttackInputs.port || "");
-  const [duration,    setDuration]    = useState(restoredDuration);
+  const [layer,       setLayer]       = useState(defaultLayer);
+  const [method,      setMethod]      = useState(defaultMethod);
+  const [target,      setTarget]      = useState("");
+  const [domain,      setDomain]      = useState("");
+  const [port,        setPort]        = useState("");
+  const [duration,    setDuration]    = useState(null);
+  const [hydratedStorageUserId, setHydratedStorageUserId] = useState(null);
   const [launching,   setLaunching]   = useState(false);
   const [launchError, setLaunchError] = useState("");
   const [launchInfo,  setLaunchInfo]  = useState("");
@@ -99,9 +84,38 @@ export default function Panel() {
     }
   }, [plan]);
 
+  // Restore only after the authenticated user and current plan are available.
+  // This prevents the initial empty render from overwriting saved inputs.
+  useEffect(() => {
+    if (!user?.id || (!isAdmin && !profile)) return;
+
+    setHydratedStorageUserId(null);
+    const saved = readLastAttackInputs(user.id);
+    const restoredLayer = allowedLayers.includes(saved.layer) ? saved.layer : defaultLayer;
+    const restoredMethods = restoredLayer === "L4" ? l4Methods : l7Methods;
+    const restoredMethod = restoredMethods.includes(saved.method)
+      ? saved.method
+      : (restoredMethods[0] || null);
+    const parsedDuration = Number(saved.duration);
+    const restoredDuration = saved.duration != null
+      && Number.isFinite(parsedDuration)
+      && (maxDuration === 0 || parsedDuration <= maxDuration)
+      && ALL_DURATIONS.includes(parsedDuration)
+      ? parsedDuration
+      : null;
+
+    setLayer(restoredLayer);
+    setMethod(restoredMethod);
+    setTarget(typeof saved.target === "string" ? saved.target : "");
+    setDomain(typeof saved.domain === "string" ? saved.domain : "");
+    setPort(typeof saved.port === "string" ? saved.port : "");
+    setDuration(restoredDuration);
+    setHydratedStorageUserId(user.id);
+  }, [user?.id, profile?.plan_id, isAdmin]);
+
   // Keep the latest form values in this browser for the current account.
   useEffect(() => {
-    if (!user?.id) return;
+    if (!user?.id || hydratedStorageUserId !== user.id) return;
     try {
       window.localStorage.setItem(
         `${ATTACK_FORM_STORAGE_KEY}:${user.id}`,
@@ -110,7 +124,7 @@ export default function Panel() {
     } catch {
       // Browser storage can be unavailable in private or restricted contexts.
     }
-  }, [user?.id, layer, method, target, domain, port, duration]);
+  }, [user?.id, hydratedStorageUserId, layer, method, target, domain, port, duration]);
 
   // Keep method in sync when switching layers
   const selectLayer = (l) => {
