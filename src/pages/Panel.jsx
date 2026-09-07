@@ -70,6 +70,7 @@ export default function Panel() {
   const [allocationPreview, setAllocationPreview] = useState(null);
   const [previewingAllocation, setPreviewingAllocation] = useState(false);
   const [allocationError, setAllocationError] = useState("");
+  const [multiTargetReport, setMultiTargetReport] = useState(null);
 
   const currentMethods = layer === "L4" ? l4Methods : l7Methods;
   const durations = ALL_DURATIONS.filter(d => maxDuration === 0 || d <= maxDuration);
@@ -310,10 +311,6 @@ export default function Panel() {
     e.preventDefault();
     if (!target.trim() || !method || !layer || !duration) return;
     if (needsPort && !port.trim()) return;
-    if (layer === "L4" && target.split(",").map((value) => value.trim()).filter(Boolean).length > 1) {
-      setLaunchError("Launch run accepts one target at a time. Use the allocation preview below to simulate multiple IPs.");
-      return;
-    }
     if (dailyLimitReached) {
       setLaunchError(`Daily limit reached (${maxDailyRuns} attacks/day). Resets at midnight.`);
       return;
@@ -321,6 +318,7 @@ export default function Panel() {
 
     setLaunchError("");
     setLaunchInfo("");
+    setMultiTargetReport(null);
     setLaunching(true);
     setShowDebug(true);
     setDebugLogs([]);
@@ -358,6 +356,8 @@ export default function Panel() {
     let nodesOnline = 0;
     let nodesTotal  = 0;
     let proxyOk     = false;
+    let dryRunCompleted = false;
+    let dryRunSucceeded = false;
 
     const { data: { session } } = await supabase.auth.getSession();
     const authToken = session?.access_token ?? "";
@@ -393,18 +393,42 @@ export default function Panel() {
         });
         const json = await r.json();
         if (!r.ok) throw new Error(json?.error ?? `HTTP ${r.status}`);
-        nodesTotal  = json.total;
-        nodesOnline = json.online;
+        if (json.mode === "multi_target") {
+          nodesTotal = json.totalNodes;
+          nodesOnline = json.onlineNodes;
+          dryRunCompleted = true;
+          dryRunSucceeded = json.successfulTargets > 0;
+          setMultiTargetReport(json);
+          dbg(
+            dryRunSucceeded ? "info" : "warn",
+            `Multi-target dry run: ${json.successfulTargets}/${json.totalTargets} target(s) succeeded`
+          );
+          json.allocations?.forEach((allocation) => {
+            dbg(
+              allocation.status === "success" ? "info" : "warn",
+              `${allocation.target} → ${allocation.assignedNodes.join(", ") || "no assigned nodes"} (${allocation.status})`
+            );
+          });
+          setLaunchInfo(
+            `Dry run: ${json.successfulTargets}/${json.totalTargets} target(s) succeeded; ` +
+            `${nodesOnline}/${nodesTotal} node(s) online`
+          );
+        } else {
+          nodesTotal  = json.total;
+          nodesOnline = json.online;
+          setLaunchInfo(nodesTotal === 0 ? "No API nodes registered" : `${nodesOnline}/${nodesTotal} node(s) online`);
+        }
         proxyOk = true;
-        json.results?.forEach((res, i) => {
-          if (res.success) {
-            dbg("info",  `✓ node ${i + 1} → instance_id=${res.instance_id}`);
-          } else {
-            dbg("warn",  `✗ node ${i + 1} → ${res.error}`);
-          }
-        });
-        dbg(nodesOnline > 0 ? "info" : "warn", `Result: ${nodesOnline}/${nodesTotal} L4 node(s) responded`);
-        setLaunchInfo(nodesTotal === 0 ? "No API nodes registered" : `${nodesOnline}/${nodesTotal} node(s) online`);
+        if (json.mode !== "multi_target") {
+          json.results?.forEach((res, i) => {
+            if (res.success) {
+              dbg("info",  `✓ node ${i + 1} → instance_id=${res.instance_id}`);
+            } else {
+              dbg("warn",  `✗ node ${i + 1} → ${res.error}`);
+            }
+          });
+          dbg(nodesOnline > 0 ? "info" : "warn", `Result: ${nodesOnline}/${nodesTotal} L4 node(s) responded`);
+        }
       } catch (err) {
         dbg("error", `L4 proxy error: ${err.message}`);
         setLaunchError(err.message);
@@ -447,8 +471,14 @@ export default function Panel() {
 
     // ── 3. Update run status based on proxy result ─────────────────────────
     if (proxyOk) {
-      await supabase.from(table).update({ status: "running", started_at: startedAt }).eq("id", insertedRun.id);
-      dbg("info", `Run ${insertedRun.id} → status=running`);
+      const finalStatus = dryRunCompleted
+        ? (dryRunSucceeded ? "success" : "failed")
+        : "running";
+      const statusUpdate = finalStatus === "running"
+        ? { status: finalStatus, started_at: startedAt }
+        : { status: finalStatus, stopped_at: new Date().toISOString() };
+      await supabase.from(table).update(statusUpdate).eq("id", insertedRun.id);
+      dbg("info", `Run ${insertedRun.id} → status=${finalStatus}`);
     } else {
       // Proxy call failed — mark as failed so it doesn't lock the busy state
       await supabase.from(table).update({ status: "failed", stopped_at: new Date().toISOString() }).eq("id", insertedRun.id);
@@ -597,8 +627,8 @@ export default function Panel() {
                     </Field>
                   )}
 
-                  {/* Target */}
-                  <Field label={layer === "L4" ? "Target IP(s) — allocation preview" : "Target URL"}>
+                   {/* Target */}
+                   <Field label={layer === "L4" ? "Target IP(s)" : "Target URL"}>
                     <input
                       required
                       type="text"
@@ -610,7 +640,7 @@ export default function Panel() {
                     {layer === "L4" && (
                       <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
                         <p className="text-[11px] text-muted-foreground">
-                          Enter comma-separated IPs to preview node assignment. No traffic is sent.
+                           Single IPs use the existing launch path. Multiple IPs run a health-check allocation dry run.
                         </p>
                         <button
                           type="button"
@@ -742,6 +772,48 @@ export default function Panel() {
 
                   {launchInfo && !launchError && (
                     <p className="text-xs text-zinc-400">{launchInfo}</p>
+                  )}
+
+                  {multiTargetReport && (
+                    <div className="rounded-lg border border-cyan-400/20 bg-cyan-400/5 p-3">
+                      <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                        <span className="font-medium text-cyan-100">Multi-target dry-run report</span>
+                        <span className="font-mono text-cyan-200/70">
+                          {multiTargetReport.successfulTargets} succeeded / {multiTargetReport.failedTargets} failed
+                        </span>
+                      </div>
+                      <div className="space-y-1.5">
+                        {multiTargetReport.allocations.map((allocation) => (
+                          <div
+                            key={allocation.target}
+                            className="rounded-md border border-white/[0.06] bg-black/20 px-2.5 py-2"
+                          >
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <span className="font-mono text-xs text-zinc-200">{allocation.target}</span>
+                              <span className={allocation.status === "success" ? "text-[11px] text-emerald-300" : "text-[11px] text-red-300"}>
+                                {allocation.status}
+                              </span>
+                            </div>
+                            <p className="mt-1 text-[11px] text-muted-foreground">
+                              {allocation.assignedNodes.length
+                                ? `Assigned: ${allocation.assignedNodes.join(", ")}`
+                                : "No healthy node assigned"}
+                            </p>
+                            {allocation.nodeResponses.length > 0 && (
+                              <p className="mt-1 text-[10px] text-muted-foreground/80">
+                                {allocation.nodeResponses.map((node) => `${node.node}: ${node.status}${node.responseTime != null ? ` (${node.responseTime}ms)` : ""}`).join(" · ")}
+                              </p>
+                            )}
+                            {allocation.error && (
+                              <p className="mt-1 text-[10px] text-red-300/80">{allocation.error}</p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                      <p className="mt-2 text-[10px] text-cyan-200/60">
+                        Health checks only — no attack or traffic endpoint was contacted.
+                      </p>
+                    </div>
                   )}
 
                   <button
